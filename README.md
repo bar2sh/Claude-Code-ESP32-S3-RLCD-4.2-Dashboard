@@ -49,7 +49,7 @@ The screen is a reflective LCD: it is lit by the room, like paper, with no backl
   </tr>
 </table>
 
-A bar along the bottom of the sessions view shows the five-hour plan limit, when it resets and how old the reading is. A fourth view shows a full-screen wallpaper.
+A fourth view shows a full-screen wallpaper; you can see it in the [video above](#see-it-in-action).
 
 ## In the app
 
