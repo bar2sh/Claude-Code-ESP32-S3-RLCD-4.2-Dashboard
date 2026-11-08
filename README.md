@@ -16,6 +16,16 @@ Firmware for the Waveshare ESP32-S3-RLCD-4.2, a plain PHP server and a phone app
 
 </div>
 
+## See it in action
+
+<p align="center">
+  <a href="https://youtu.be/NNZ-SbqHNbI" title="Watch the board in action on YouTube">
+    <img src="https://img.youtube.com/vi/NNZ-SbqHNbI/maxresdefault.jpg" width="640" alt="Video: the real board on a desk showing a full-screen Claude Code notification with the Clawd animation. Click to play on YouTube.">
+  </a>
+  <br>
+  <sub>▶ <a href="https://youtu.be/NNZ-SbqHNbI">Watch on YouTube</a>: the board on a desk, live with Claude Code sessions</sub>
+</p>
+
 ## On the board
 
 The screen is a reflective LCD: it is lit by the room, like paper, with no backlight. 400×300 pixels, one bit per pixel. The images below are rendered pixel for pixel from the firmware's own `views.c` on a desktop build.
