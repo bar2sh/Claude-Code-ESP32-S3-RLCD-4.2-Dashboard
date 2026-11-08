@@ -61,8 +61,6 @@ The app is a PWA served by the same PHP server. It runs on any phone, installs t
   <img src="docs/images/app-send-light.png" width="200" alt="Sending a message with a sound">
 </p>
 
-<p align="center"><sub>Dashboard (dark and light) · Send a message</sub></p>
-
 <p align="center">
   <img src="docs/images/app-board-dark.png" width="200" alt="Board tab: the active view and the device status">
   <img src="docs/images/app-board-settings-dark.png" width="200" alt="Board tab: how often the board checks the server, the language on the board screen and the start of the Claude notification settings">
