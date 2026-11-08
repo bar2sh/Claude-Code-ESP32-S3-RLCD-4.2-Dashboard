@@ -59,17 +59,15 @@ The app is a PWA served by the same PHP server. It runs on any phone, installs t
   <img src="docs/images/app-dashboard-dark.png" width="200" alt="App dashboard in dark mode: sessions with model, context use and task progress, plus the five-hour and weekly limits">
   <img src="docs/images/app-dashboard-light.png" width="200" alt="App dashboard in light mode">
   <img src="docs/images/app-send-light.png" width="200" alt="Sending a message with a sound">
-  <img src="docs/images/app-board-dark.png" width="200" alt="Board settings: the active view and the device status">
 </p>
 
-<p align="center"><sub>Dashboard (dark and light) · Send a message · Board settings</sub></p>
+<p align="center"><sub>Dashboard (dark and light) · Send a message</sub></p>
 
 <p align="center">
-  <img src="docs/images/app-board-settings-light.png" width="200" alt="Board settings in light mode: the language on the board screen and the Claude notification mode (quiet, ready for more tasks, eager) and where it shows">
-  <img src="docs/images/app-board-notify-dark.png" width="200" alt="Claude notifications in dark mode: the sound and the Clawd animation the board plays when a session is done">
+  <img src="docs/images/app-board-dark.png" width="200" alt="Board tab: the active view and the device status">
+  <img src="docs/images/app-board-settings-dark.png" width="200" alt="Board tab: how often the board checks the server, the language on the board screen and the start of the Claude notification settings">
+  <img src="docs/images/app-board-notify-dark.png" width="200" alt="Board tab: the sound and the Clawd animation the board plays when a Claude session is done or waiting for you">
 </p>
-
-<p align="center"><sub>Board language and notification mode · Sound and animation for Claude notifications</sub></p>
 
 ## Highlights
 
