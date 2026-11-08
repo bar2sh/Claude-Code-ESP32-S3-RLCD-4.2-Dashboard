@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#E4EAED" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0A1013" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Noticeboard">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="description" content="Messages, sounds and wallpaper for the RLCD board">
+<title>Noticeboard</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="app.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<!-- Every text comes from lib/i18n.js: data-i18n sets the text, data-i18n-aria-label and data-i18n-placeholder the attributes. -->
+<header class="top">
+  <div class="top-in">
+    <h1 data-i18n="app.name"></h1>
+    <button type="button" id="person" class="person" aria-haspopup="dialog" hidden>
+      <span id="person-mono" class="mono" aria-hidden="true"></span>
+      <span id="person-name" class="person-name"></span>
+    </button>
+    <button type="button" id="refresh" class="icon-btn" data-i18n-aria-label="action.refresh" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66L20 8.5"/><path d="M20 3.5v5h-5"/></svg>
+    </button>
+  </div>
+</header>
+
+<nav id="tabs" class="tabs" data-i18n-aria-label="tabs.label" data-active="2" hidden>
+  <div class="tablist" role="tablist">
+    <span class="drop" aria-hidden="true"></span>
+    <button type="button" class="tab" role="tab" id="tab-send" aria-controls="panel-send" aria-selected="false" tabindex="-1" data-i18n-aria-label="tab.send" data-i18n-title="tab.send">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3 3 10.5l7 2.5 2.5 7z"/><path d="m10 13 4.5-4.5"/></svg>
+    </button>
+    <button type="button" class="tab" role="tab" id="tab-board" aria-controls="panel-board" aria-selected="false" tabindex="-1" data-i18n-aria-label="tab.board" data-i18n-title="tab.board">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 10h8M7 14h5"/></svg>
+    </button>
+    <button type="button" class="tab" role="tab" id="tab-dash" aria-controls="panel-dash" aria-selected="true" data-i18n-aria-label="tab.dash" data-i18n-title="tab.dash">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="10" rx="2"/><rect x="13" y="3" width="8" height="6" rx="2"/><rect x="13" y="11" width="8" height="10" rx="2"/><rect x="3" y="15" width="8" height="6" rx="2"/></svg>
+    </button>
+    <button type="button" class="tab" role="tab" id="tab-sounds" aria-controls="panel-sounds" aria-selected="false" tabindex="-1" data-i18n-aria-label="tab.sounds" data-i18n-title="tab.sounds">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>
+    </button>
+    <button type="button" class="tab" role="tab" id="tab-wall" aria-controls="panel-wall" aria-selected="false" tabindex="-1" data-i18n-aria-label="tab.wall" data-i18n-title="tab.wall">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m4 17 5-4.5 3.5 3 3-2.5L20 17"/></svg>
+    </button>
+  </div>
+</nav>
+
+<main id="main">
+  <p id="offline" class="panel banner mark" role="status" data-i18n="offline" hidden></p>
+  <p id="update" class="panel banner" hidden><span data-i18n="update.text"></span> · <button type="button" id="update-btn" class="link-btn" data-i18n="action.refresh"></button></p>
+  <p id="state-error" class="panel banner mark" role="alert" hidden></p>
+
+  <section id="panel-send" role="tabpanel" aria-labelledby="tab-send" hidden>
+    <form id="send-form" class="panel" novalidate>
+      <h2 data-i18n="send.title"></h2>
+      <div class="field">
+        <div class="label-row"><label for="msg-text" data-i18n="send.text"></label><span id="msg-count" class="count">0/280</span></div>
+        <textarea id="msg-text" rows="4" autocomplete="off" aria-describedby="msg-count"></textarea>
+      </div>
+      <div id="msg-warn" class="warn" hidden>
+        <p class="mark"><span data-i18n="send.cannotDraw"></span> <span id="msg-warn-chars" class="chars"></span></p>
+        <button type="button" id="msg-replace" data-i18n="send.replace"></button>
+      </div>
+      <fieldset class="sound-pick">
+        <legend data-i18n="field.sound"></legend>
+        <div id="sound-chips" class="chips"></div>
+        <p id="sound-desc" class="hint"></p>
+      </fieldset>
+      <button type="submit" id="send-btn" class="primary wide" data-i18n="send.button"></button>
+      <p id="send-error" class="error mark" role="alert"></p>
+    </form>
+
+    <section class="panel" aria-labelledby="now-title">
+      <h2 id="now-title" data-i18n="now.title"></h2>
+      <p id="now-empty" class="hint" data-i18n="now.empty"></p>
+      <div id="now-body" hidden>
+        <p class="meta"><span id="now-from"></span> · <span id="now-time" class="num"></span></p>
+        <p id="now-text" class="message-text"></p>
+        <p class="meta"><span data-i18n="now.sound"></span> <span id="now-sound"></span></p>
+      </div>
+    </section>
+  </section>
+
+  <section id="panel-board" role="tabpanel" aria-labelledby="tab-board" hidden>
+    <section class="panel" aria-labelledby="view-title">
+      <h2 id="view-title" data-i18n="view.title"></h2>
+      <fieldset id="view-options" class="options">
+        <legend class="vh" data-i18n="view.legend"></legend>
+        <label class="option"><input type="radio" name="view" value="dashboard"><span><strong data-i18n="view.dashboard"></strong><span class="hint" data-i18n="view.dashboard.hint"></span></span></label>
+        <label class="option"><input type="radio" name="view" value="message"><span><strong data-i18n="view.message"></strong><span class="hint" data-i18n="view.message.hint"></span></span></label>
+        <label class="option"><input type="radio" name="view" value="wallpaper"><span><strong data-i18n="view.wallpaper"></strong><span class="hint" data-i18n="view.wallpaper.hint"></span></span></label>
+        <label class="option"><input type="radio" name="view" value="sessions"><span><strong data-i18n="view.sessions"></strong><span class="hint" data-i18n="view.sessions.hint"></span></span></label>
+      </fieldset>
+      <p class="hint" data-i18n="view.note"></p>
+      <p id="view-error" class="error mark" role="alert"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="device-title">
+      <h2 id="device-title" data-i18n="device.title"></h2>
+      <dl class="facts">
+        <div><dt data-i18n="device.seen"></dt><dd id="dev-seen" class="num"></dd></div>
+        <div><dt data-i18n="device.mode"></dt><dd id="dev-mode"></dd></div>
+        <div><dt data-i18n="device.power"></dt><dd id="dev-power" class="num"></dd></div>
+      </dl>
+      <p id="dev-warn" class="warn-text mark" hidden></p>
+      <p class="hint" data-i18n="device.note"></p>
+      <fieldset id="poll" class="options poll">
+        <legend data-i18n="poll.title"></legend>
+        <label class="option"><input type="radio" name="poll" value="default"><span><strong id="poll-default" data-i18n="poll.default"></strong></span></label>
+        <label class="option"><input type="radio" name="poll" value="custom"><span><strong data-i18n="poll.custom"></strong><span id="poll-range" class="hint"></span></span></label>
+        <div id="poll-custom" class="inline poll-custom" hidden>
+          <label for="poll-seconds" class="vh" data-i18n="poll.seconds"></label>
+          <input id="poll-seconds" type="text" inputmode="numeric" maxlength="4" autocomplete="off" spellcheck="false" aria-describedby="poll-range poll-error">
+          <span class="unit" aria-hidden="true" data-i18n="poll.unit"></span>
+          <button type="button" id="poll-save" class="primary" data-i18n="poll.save"></button>
+        </div>
+      </fieldset>
+      <p id="poll-error" class="error mark" role="alert"></p>
+      <p class="hint" data-i18n="poll.hint"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="board-settings-title">
+      <h2 id="board-settings-title" data-i18n="board.title"></h2>
+      <div id="settings" class="editor">
+        <fieldset class="seg-field">
+          <legend data-i18n="board.lang"></legend>
+          <div class="seg">
+            <input type="radio" name="lang" id="lang-en" value="en"><label for="lang-en" lang="en" data-i18n="lang.en"></label>
+            <input type="radio" name="lang" id="lang-pl" value="pl"><label for="lang-pl" lang="pl" data-i18n="lang.pl"></label>
+          </div>
+        </fieldset>
+      </div>
+      <p class="hint" data-i18n="board.applyHint"></p>
+      <p id="settings-error" class="error mark" role="alert"></p>
+    </section>
+
+    <section id="notify" class="panel" aria-labelledby="notify-title">
+      <h2 id="notify-title" data-i18n="notify.title"></h2>
+      <p id="notify-none" class="hint"></p>
+      <div id="notify-form" hidden>
+        <p id="notify-mode-warn" class="warn-text mark"></p>
+        <fieldset class="options">
+          <legend data-i18n="notify.mode"></legend>
+          <label class="option"><input type="radio" name="notify-mode" value="quiet"><span><strong data-i18n="notify.quiet"></strong><span class="hint" data-i18n="notify.quiet.hint"></span></span></label>
+          <label class="option"><input type="radio" name="notify-mode" value="ready"><span><strong data-i18n="notify.ready"></strong><span class="hint" data-i18n="notify.ready.hint"></span></span></label>
+          <label class="option"><input type="radio" name="notify-mode" value="each"><span><strong data-i18n="notify.each"></strong><span class="hint" data-i18n="notify.each.hint"></span></span></label>
+        </fieldset>
+        <p id="notify-quiet" class="hint" data-i18n="notify.quietNote" hidden></p>
+        <fieldset class="options">
+          <legend data-i18n="notify.where"></legend>
+          <label class="option"><input type="radio" name="notify-scope" value="sessions"><span><strong data-i18n="notify.scope.sessions"></strong></span></label>
+          <label class="option"><input type="radio" name="notify-scope" value="all"><span><strong data-i18n="notify.scope.all"></strong></span></label>
+        </fieldset>
+        <section class="alert" aria-labelledby="notify-done-title">
+          <h3 id="notify-done-title" data-i18n="notify.done"></h3>
+          <fieldset>
+            <legend data-i18n="field.sound"></legend>
+            <div id="notify-done-sounds" class="chips"></div>
+            <p id="notify-done-desc" class="hint"></p>
+            <p id="notify-done-gone" class="warn-text mark"></p>
+          </fieldset>
+          <fieldset>
+            <legend data-i18n="notify.anim"></legend>
+            <div id="notify-done-anims" class="anims"></div>
+          </fieldset>
+        </section>
+        <section class="alert" aria-labelledby="notify-wait-title">
+          <h3 id="notify-wait-title" data-i18n="notify.wait"></h3>
+          <fieldset>
+            <legend data-i18n="field.sound"></legend>
+            <div id="notify-wait-sounds" class="chips"></div>
+            <p id="notify-wait-desc" class="hint"></p>
+            <p id="notify-wait-gone" class="warn-text mark"></p>
+          </fieldset>
+          <fieldset>
+            <legend data-i18n="notify.anim"></legend>
+            <div id="notify-wait-anims" class="anims"></div>
+          </fieldset>
+        </section>
+        <button type="button" id="notify-save" class="primary wide" aria-disabled="true" data-i18n="notify.save"></button>
+        <p id="notify-error" class="error mark" role="alert"></p>
+      </div>
+    </section>
+  </section>
+
+  <section id="panel-dash" role="tabpanel" aria-labelledby="tab-dash">
+    <h2 class="sr-only" id="dash-title" data-i18n="tab.dash"></h2>
+    <section class="dash-hero" aria-labelledby="dash-title">
+      <canvas id="dash-clawd" class="clawd-big" width="64" height="64" role="img"></canvas>
+      <p id="dash-status" class="dash-status" role="status"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="sessions-title">
+      <h2 id="sessions-title" data-i18n="sessions.title"></h2>
+      <ul id="sessions-list" class="rows"></ul>
+      <p id="sessions-empty" class="hint" data-i18n="sessions.empty"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="limits-title">
+      <h2 id="limits-title" data-i18n="limits.title"></h2>
+      <p id="limits-hit" class="mark" role="alert" data-i18n="limits.hit" hidden></p>
+      <div id="limits-list" class="limits"></div>
+      <p id="limits-hint" class="hint" data-i18n="limits.hint"></p>
+    </section>
+
+  </section>
+
+  <section id="panel-sounds" role="tabpanel" aria-labelledby="tab-sounds" hidden>
+    <section class="panel" aria-labelledby="import-title">
+      <h2 id="import-title" data-i18n="import.title"></h2>
+      <div class="field">
+        <label for="mi-url" data-i18n="import.link"></label>
+        <div class="inline">
+          <input id="mi-url" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" data-i18n-placeholder="import.placeholder">
+          <button type="button" id="mi-fetch" data-i18n="import.fetch"></button>
+        </div>
+      </div>
+      <p class="hint" data-i18n="import.or"></p>
+      <button type="button" id="file-pick" data-i18n="import.file"></button>
+      <input type="file" id="file-input" accept="audio/*" hidden>
+      <p id="import-error" class="error mark" role="alert"></p>
+    </section>
+
+    <section id="preview" class="panel" aria-labelledby="preview-title" hidden>
+      <h2 id="preview-title" tabindex="-1" data-i18n="preview.title"></h2>
+      <audio id="preview-audio" controls preload="auto"></audio>
+      <p id="preview-meta" class="meta num"></p>
+      <p id="preview-trim" class="warn-text mark" hidden></p>
+      <div class="field">
+        <div class="label-row"><label for="preview-name" data-i18n="preview.name"></label><span id="preview-count" class="count">0/24</span></div>
+        <input id="preview-name" type="text" autocomplete="off" spellcheck="false" aria-describedby="preview-count">
+      </div>
+      <div class="row">
+        <button type="button" id="preview-save" class="primary" data-i18n="preview.save"></button>
+        <button type="button" id="preview-discard" data-i18n="preview.discard"></button>
+      </div>
+      <p id="save-error" class="error mark" role="alert"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="lib-title">
+      <h2 id="lib-title"><span data-i18n="lib.title"></span> <span id="lib-count" class="num">0/50</span></h2>
+      <ul id="lib-list" class="rows"></ul>
+      <p id="lib-empty" class="hint" data-i18n="lib.empty"></p>
+      <p id="lib-error" class="error mark" role="alert"></p>
+    </section>
+  </section>
+
+  <section id="panel-wall" role="tabpanel" aria-labelledby="tab-wall" hidden>
+    <section class="panel" aria-labelledby="wall-title">
+      <h2 id="wall-title" data-i18n="wall.title"></h2>
+      <div class="screen">
+        <canvas id="wall-current" width="400" height="300" role="img" data-i18n-aria-label="wall.currentLabel" hidden></canvas>
+        <p id="wall-none" class="screen-note" data-i18n="wall.none"></p>
+      </div>
+      <p id="wall-current-error" class="error mark" role="alert"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="new-wall-title">
+      <h2 id="new-wall-title" data-i18n="wall.newTitle"></h2>
+      <button type="button" id="img-pick" data-i18n="wall.pick"></button>
+      <input type="file" id="img-input" accept="image/*" hidden>
+      <p id="img-error" class="error mark" role="alert"></p>
+      <div id="wall-editor" class="editor" hidden>
+        <div class="screen"><canvas id="wall-preview" width="400" height="300" role="img" data-i18n-aria-label="wall.previewLabel"></canvas></div>
+        <fieldset class="seg-field">
+          <legend data-i18n="wall.fit"></legend>
+          <div class="seg">
+            <input type="radio" name="fit" id="fit-cover" value="cover" checked><label for="fit-cover" data-i18n="wall.cover"></label>
+            <input type="radio" name="fit" id="fit-contain" value="contain"><label for="fit-contain" data-i18n="wall.contain"></label>
+          </div>
+        </fieldset>
+        <fieldset class="seg-field">
+          <legend data-i18n="wall.drawing"></legend>
+          <div class="seg">
+            <input type="radio" name="dither" id="dither-on" value="1" checked><label for="dither-on" data-i18n="wall.dither"></label>
+            <input type="radio" name="dither" id="dither-off" value="0"><label for="dither-off" data-i18n="wall.outline"></label>
+          </div>
+        </fieldset>
+        <div class="field">
+          <div class="label-row"><label for="brightness" data-i18n="wall.brightness"></label><output id="brightness-out" for="brightness" class="count">0</output></div>
+          <input type="range" id="brightness" min="-50" max="50" step="1" value="0">
+        </div>
+        <button type="button" id="wall-send" class="primary wide" data-i18n="wall.send"></button>
+        <p id="wall-error" class="error mark" role="alert"></p>
+      </div>
+    </section>
+  </section>
+
+  <section id="add" class="panel add" aria-labelledby="add-title" hidden>
+    <div id="first-lang" class="first-lang" hidden>
+      <fieldset class="seg-field" id="first-lang-options">
+        <legend data-i18n="settings.lang"></legend>
+        <div class="seg">
+          <input type="radio" name="first-lang" id="first-lang-en" value="en"><label for="first-lang-en" lang="en" data-i18n="lang.en"></label>
+          <input type="radio" name="first-lang" id="first-lang-pl" value="pl"><label for="first-lang-pl" lang="pl" data-i18n="lang.pl"></label>
+        </div>
+      </fieldset>
+      <p class="hint" data-i18n="settings.langHint"></p>
+      <p id="first-lang-error" class="error mark" role="alert"></p>
+    </div>
+    <h2 id="add-title" data-i18n="add.title"></h2>
+    <p id="add-reason" class="warn-text mark" role="alert"></p>
+    <p class="hint" data-i18n="add.hint"></p>
+    <form id="add-form" novalidate>
+      <div class="field">
+        <label for="add-token" data-i18n="add.token"></label>
+        <div class="inline">
+          <input id="add-token" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+          <button type="button" id="add-show" aria-pressed="false" aria-controls="add-token" data-i18n="add.show"></button>
+        </div>
+      </div>
+      <button type="submit" id="add-submit" class="primary wide" data-i18n="add.submit"></button>
+      <p id="add-error" class="error mark" role="alert"></p>
+    </form>
+    <div class="row">
+      <button type="button" id="add-switch" data-i18n="add.switch" hidden></button>
+      <button type="button" id="add-cancel" data-i18n="action.cancel" hidden></button>
+    </div>
+  </section>
+</main>
+
+<dialog id="people" aria-labelledby="people-title">
+  <h2 id="people-title" data-i18n="people.title"></h2>
+  <ul id="people-list" class="people-list"></ul>
+  <div class="row">
+    <button type="button" id="people-add" class="primary" data-i18n="people.add"></button>
+    <button type="button" id="people-close" data-i18n="action.close" autofocus></button>
+  </div>
+  <section class="settings" aria-labelledby="settings-title">
+    <h3 id="settings-title" data-i18n="settings.title"></h3>
+    <fieldset class="seg-field" id="lang-options">
+      <legend data-i18n="settings.lang"></legend>
+      <div class="seg">
+        <input type="radio" name="app-lang" id="app-lang-en" value="en"><label for="app-lang-en" lang="en" data-i18n="lang.en"></label>
+        <input type="radio" name="app-lang" id="app-lang-pl" value="pl"><label for="app-lang-pl" lang="pl" data-i18n="lang.pl"></label>
+      </div>
+    </fieldset>
+    <p class="hint" data-i18n="settings.langHint"></p>
+    <p id="lang-error" class="error mark" role="alert"></p>
+  </section>
+</dialog>
+
+<dialog id="confirm" aria-labelledby="confirm-text">
+  <p id="confirm-text"></p>
+  <div class="row">
+    <button type="button" id="confirm-yes" class="primary" data-i18n="action.delete"></button>
+    <button type="button" id="confirm-no" data-i18n="action.cancel" autofocus></button>
+  </div>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<template id="tpl-chip"><span class="choice"><input type="radio" name="sound"><label class="chip"></label></span></template>
+<template id="tpl-play"><button type="button" class="icon-btn play"><svg class="i-play" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></svg><svg class="i-stop" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/></svg></button></template>
+<template id="tpl-anim"><span class="anim-choice"><input type="radio"><label class="anim"><canvas width="64" height="64" aria-hidden="true"></canvas><span class="anim-name"></span></label></span></template>
+<template id="tpl-session"><li class="session"><span class="s-name"></span><span class="s-state"></span><span class="s-age num"></span><span class="s-tasks" hidden><span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span class="bar-fill"></span></span><span class="s-tasks-n num"></span></span><span class="s-facts"></span></li></template>
+<template id="tpl-limit"><div class="limit"><div class="limit-head"><span class="limit-name"></span><span class="limit-value num"></span></div><div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span class="bar-fill"></span></div><p class="limit-note hint"></p></div></template>
+<template id="tpl-sound"><li class="sound"><div class="sound-info"><span class="sound-name"></span><span class="sound-meta num"></span></div><div class="sound-actions"><button type="button" class="play-btn" data-i18n="sound.play"></button><button type="button" class="delete-btn" data-i18n="action.delete"></button></div></li></template>
+<template id="tpl-person"><li class="person-row"><button type="button" class="switch"><span class="mono" aria-hidden="true"></span><span class="pname"></span><span class="pnote"></span></button><button type="button" class="remove" data-i18n="people.remove"></button></li></template>
+</body>
+</html>

@@ -1,0 +1,14 @@
+server/config.php
+server/data/*
+!server/data/.htaccess
+firmware/main/secrets.h
+firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/managed_components/
+*.bin
+!tools/*.py
+.DS_Store
+__pycache__/
+# Session handoff notes stay local; the public repo describes the finished product.
+docs/PROGRESS.md

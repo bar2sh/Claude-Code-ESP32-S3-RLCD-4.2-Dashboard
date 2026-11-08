@@ -1,0 +1,32 @@
+{
+  "statusLine": { "type": "command", "command": "\"$HOME/.claude/hooks/rlcd-statusline.sh\"" },
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "\"$HOME/.claude/hooks/rlcd-hook.sh\" working" }] }
+    ],
+    "PreToolUse": [
+      { "matcher": "AskUserQuestion|ExitPlanMode", "hooks": [{ "type": "command", "command": "\"$HOME/.claude/hooks/rlcd-hook.sh\" waiting" }] }
+    ],
+    "PostToolUse": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "\"$HOME/.claude/hooks/rlcd-hook.sh\" working" }] }
+    ],
+    "SubagentStart": [
+      { "hooks": [{ "type": "command", "command": "\"$HOME/.claude/hooks/rlcd-hook.sh\" agent-start" }] }
+    ],
+    "SubagentStop": [
+      { "hooks": [{ "type": "command", "command": "\"$HOME/.claude/hooks/rlcd-hook.sh\" agent-stop" }] }
+    ],
+    "Notification": [
+      { "hooks": [{ "type": "command", "command": "\"$HOME/.claude/hooks/rlcd-hook.sh\" waiting" }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "\"$HOME/.claude/hooks/rlcd-hook.sh\" done" }] }
+    ],
+    "StopFailure": [
+      { "matcher": "rate_limit", "hooks": [{ "type": "command", "command": "\"$HOME/.claude/hooks/rlcd-hook.sh\" limit" }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "\"$HOME/.claude/hooks/rlcd-hook.sh\" end" }] }
+    ]
+  }
+}

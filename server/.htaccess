@@ -1,0 +1,24 @@
+Options -Indexes
+<FilesMatch "^(config\.php|config\.example\.php|sounds\.php|applock\.php)$">
+    Require all denied
+</FilesMatch>
+
+# Every request except api.php goes through gate.php: it serves only the app files and holds the device lock
+# (docs/SPEC.md, "Blokada urządzeń"). Without mod_rewrite the files are served directly and only api.php locks.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(api|gate)\.php$ - [L]
+    RewriteRule ^ gate.php [L]
+</IfModule>
+
+# PWA (docs/SPEC.md, "Aplikacja PWA"). Everything below is optional: a host without these modules still serves the app.
+<IfModule mod_mime.c>
+    AddType application/manifest+json .webmanifest
+</IfModule>
+<IfModule mod_headers.c>
+    Header always set Content-Security-Policy "default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    # the browser must see every new service worker at once
+    <FilesMatch "^sw\.js$">
+        Header set Cache-Control "no-cache"
+    </FilesMatch>
+</IfModule>

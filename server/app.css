@@ -1,0 +1,1304 @@
+/* Tablica: Liquid Glass (docs/SPEC.md, "Wygląd").
+   Two layers: content (background with two fixed glows, glass panels) and navigation
+   (header, floating tab bar, dialogs, toast) that floats above it.
+   Palette: background, ink, accent. Glass and glows are made only from these tones and white. */
+
+:root {
+  color-scheme: light dark;
+  --bg: #E4EAED;
+  --ink: #0D171B;
+  --ink-rgb: 13 23 27;
+  --accent: #A33508;
+  --muted: #46555B;
+  --on-accent: #FFFFFF;
+  --glass: rgb(255 255 255 / .62);
+  /* The navigation layer floats over scrolling content. Light glass over a black area keeps ink at 6.8:1. */
+  --glass-nav: rgb(255 255 255 / .62);
+  --glass-solid: #FDFDFE;
+  --edge: rgb(255 255 255 / .7);
+  --hi: rgb(255 255 255 / .9);
+  --shadow: rgb(13 23 27 / .14);
+  --glow-accent: rgb(163 53 8 / .26);
+  --glow-ink: rgb(13 23 27 / .10);
+  --fill: rgb(13 23 27 / .06);
+  --fill-strong: rgb(13 23 27 / .08);
+  --field-edge: rgb(13 23 27 / .5);
+  --line: rgb(13 23 27 / .12);
+  --scrim: rgb(13 23 27 / .25);
+  /* The Dashboard's Clawd (app.js reads them as #RRGGBB): 3.5:1 to --bg, eyes 4.3:1 to the body. */
+  --clawd: #C15F3C;
+  --clawd-eye: #0D171B;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-round: ui-rounded, system-ui, -apple-system, sans-serif;
+  --bounce: cubic-bezier(.3, 1.4, .5, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0A1013;
+    --ink: #EEF3F5;
+    --ink-rgb: 238 243 245;
+    --accent: #FF8F57;
+    --muted: #9DACB2;
+    --on-accent: #0A1013;
+    --glass: rgb(28 37 42 / .62);
+    /* At .62 the white wallpaper canvas under the bar would leave ink at 4.0:1; .70 gives 5.2:1. */
+    --glass-nav: rgb(28 37 42 / .70);
+    --glass-solid: #1B2328;
+    --edge: rgb(255 255 255 / .16);
+    --hi: rgb(255 255 255 / .16);
+    --shadow: rgb(0 0 0 / .45);
+    --glow-accent: rgb(255 143 87 / .24);
+    --glow-ink: rgb(238 243 245 / .07);
+    --fill: rgb(238 243 245 / .06);
+    --fill-strong: rgb(238 243 245 / .08);
+    --field-edge: rgb(238 243 245 / .45);
+    --line: rgb(238 243 245 / .14);
+    --scrim: rgb(0 0 0 / .5);
+    /* 6.1:1 to --bg; the eyes take the --bg colour, so also 6.1:1 to the body */
+    --clawd: #D97757;
+    --clawd-eye: #0A1013;
+  }
+}
+
+/* ---------- base ---------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html {
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font: 17px/1.4 var(--font);
+}
+
+/* The two glows: fixed, still, under everything. Text never sits on them directly, only on glass. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 100% 0%, var(--glow-accent), transparent 62vmax),
+    radial-gradient(circle at 0% 100%, var(--glow-ink), transparent 58vmax);
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-round);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+h2 {
+  margin: 0 0 12px;
+  font-size: 20px;
+}
+
+h3 {
+  margin: 0 0 8px;
+  font-size: 17px;
+}
+
+h2:focus {
+  outline: none;
+}
+
+p {
+  margin: 0;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.vh {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- glass ---------- */
+
+.panel {
+  margin: 0 0 16px;
+  padding: 16px;
+  border: 1px solid var(--edge);
+  border-radius: 22px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: inset 0 1px 0 var(--hi), 0 10px 30px var(--shadow);
+}
+
+.top,
+.tablist,
+.toast,
+dialog {
+  background: var(--glass-nav);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+}
+
+/* ---------- header ---------- */
+
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding-top: env(safe-area-inset-top);
+  border-bottom: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 var(--hi), 0 10px 30px var(--shadow);
+}
+
+.top-in {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 640px;
+  min-height: 56px;
+  margin: 0 auto;
+  padding: 6px max(16px, env(safe-area-inset-right)) 6px max(16px, env(safe-area-inset-left));
+}
+
+.top h1 {
+  flex: 1;
+  min-width: 0;
+}
+
+.person {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 50vw;
+  padding: 0 14px 0 6px;
+}
+
+.person-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.mono {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: 700 15px/1 var(--font-round);
+}
+
+/* ---------- tab bar: a floating capsule with a sliding accent droplet ---------- */
+
+.tabs {
+  position: fixed;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  width: min(calc(100% - 32px), 440px);
+  margin: 0 auto;
+}
+
+.tablist {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  padding: 6px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  box-shadow: inset 0 1px 0 var(--hi), 0 10px 30px var(--shadow);
+}
+
+.drop {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 6px;
+  width: calc((100% - 12px) / 5);
+  border-radius: 999px;
+  background: var(--accent);
+  transition: transform 380ms var(--bounce);
+}
+
+.tabs[data-active="1"] .drop {
+  transform: translateX(100%);
+}
+
+.tabs[data-active="2"] .drop {
+  transform: translateX(200%);
+}
+
+.tabs[data-active="3"] .drop {
+  transform: translateX(300%);
+}
+
+.tabs[data-active="4"] .drop {
+  transform: translateX(400%);
+}
+
+.tablist .tab {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.1;
+  transition: color 200ms ease, transform 120ms ease;
+}
+
+.tablist .tab svg {
+  width: 26px;
+  height: 26px;
+}
+
+.tablist .tab[aria-selected="true"] {
+  color: var(--on-accent);
+}
+
+.tablist .tab span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- layout ---------- */
+
+main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 16px max(16px, env(safe-area-inset-right)) calc(96px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+}
+
+@media (min-width: 768px) {
+  .tabs {
+    position: sticky;
+    top: calc(69px + env(safe-area-inset-top));
+    bottom: auto;
+    margin: 12px auto 0;
+  }
+
+  main {
+    padding-bottom: 40px;
+  }
+}
+
+/* ---------- controls ---------- */
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--fill-strong);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform 120ms ease;
+}
+
+button:active:not(:disabled):not([aria-disabled="true"]) {
+  transform: scale(.97);
+}
+
+button.primary,
+.link-btn {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* A button waiting for its request keeps focus, so it is aria-disabled rather than disabled. */
+button:disabled,
+button[aria-disabled="true"] {
+  background: var(--fill);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+button[aria-busy="true"] {
+  cursor: progress;
+}
+
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  flex: none;
+}
+
+.icon-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+#refresh.spin svg {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.wide {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.inline {
+  display: flex;
+  gap: 8px;
+}
+
+.inline input {
+  flex: 1;
+  min-width: 0;
+}
+
+.field {
+  margin: 0 0 12px;
+}
+
+.field > label,
+.label-row label,
+legend {
+  display: block;
+  font-weight: 600;
+}
+
+.field > label {
+  margin-bottom: 6px;
+}
+
+.label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.count {
+  color: var(--muted);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.count.over {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+input[type="text"],
+input[type="url"],
+input[type="password"],
+textarea {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--field-edge);
+  border-radius: 6px;
+  background: var(--fill);
+  color: var(--ink);
+  font: inherit;
+  font-size: 17px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 112px;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+input[type="range"] {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+fieldset {
+  min-width: 0;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 0;
+}
+
+legend {
+  margin-bottom: 6px;
+  padding: 0;
+}
+
+.hint {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.meta {
+  color: var(--muted);
+  font-size: 15px;
+}
+
+/* The message as the board shows it: line breaks kept, long words broken. */
+.message-text {
+  margin: 8px 0;
+  font-size: 19px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.error {
+  margin-top: 8px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.error:empty {
+  display: none;
+}
+
+.warn-text {
+  margin-top: 8px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.warn-text:empty {
+  display: none;
+}
+
+/* A dot before warnings and errors, so their meaning does not rest on colour alone. */
+.mark::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin: 0 8px 2px 0;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+.warn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0 0 12px;
+}
+
+.warn p {
+  flex: 1 1 200px;
+  font-weight: 600;
+}
+
+.chars {
+  overflow-wrap: anywhere;
+}
+
+/* ---------- sound chips: capsules in a horizontal row ---------- */
+
+.chips {
+  display: flex;
+  gap: 8px;
+  margin: 0 -16px;
+  padding: 4px 16px;
+  overflow-x: auto;
+  scroll-padding-inline: 16px;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+/* one choice: the hidden radio, its capsule and, for a library sound, the play button */
+.choice {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.choice input,
+.seg input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* the capsule: one line of text plus padding makes the 44 px touch target */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: var(--fill-strong);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.chip:active {
+  transform: scale(.97);
+}
+
+.choice input:checked + .chip,
+.seg input:checked + label {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.choice input:focus-visible + .chip,
+.seg input:focus-visible + label {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.play .i-stop,
+.play.playing .i-play {
+  display: none;
+}
+
+.play.playing .i-stop {
+  display: block;
+}
+
+@media (min-width: 768px) {
+  .chips {
+    flex-wrap: wrap;
+    margin: 0;
+    padding: 4px 0;
+    overflow: visible;
+  }
+}
+
+/* ---------- board screen: views, device, sessions ---------- */
+
+.option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 44px;
+  padding: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.option + .option {
+  border-top: 1px solid var(--line);
+}
+
+.option input {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+}
+
+.option strong,
+.option .hint {
+  display: block;
+}
+
+.option .hint {
+  margin-top: 2px;
+}
+
+.options[aria-busy="true"] .option {
+  cursor: progress;
+}
+
+/* The listen interval in "Device status": the seconds row lines up with the option text above it
+   (12 px padding + 22 px radio + 12 px gap). */
+.poll {
+  margin-top: 16px;
+}
+
+.poll-custom {
+  padding: 0 12px 12px 46px;
+}
+
+.poll-custom input {
+  flex: 0 1 6.5em;
+  font-variant-numeric: tabular-nums;
+}
+
+.poll-custom .unit {
+  align-self: center;
+  font-weight: 600;
+}
+
+/* The error right under the seconds row, in line with the option text, so the phone keyboard does not
+   hide it. Outside the fieldset: aria-busy there must not hold back the alert. */
+.poll + .error {
+  margin: 0 12px 0 46px;
+}
+
+.facts {
+  margin: 0;
+}
+
+.facts div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  padding: 10px 0;
+}
+
+.facts div + div {
+  border-top: 1px solid var(--line);
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+}
+
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rows > li + li {
+  border-top: 1px solid var(--line);
+}
+
+.session {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name age" "state age" "tasks tasks" "facts facts";
+  gap: 2px 16px;
+  padding: 10px 0;
+}
+
+.s-name {
+  grid-area: name;
+  display: -webkit-box;
+  overflow: hidden;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.s-state {
+  grid-area: state;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.session.waiting .s-state {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.session.waiting .s-state::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin: 0 6px 2px 0;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+.s-tasks {
+  grid-area: tasks;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.s-tasks .bar {
+  flex: 1;
+}
+
+.s-tasks-n {
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.s-facts {
+  grid-area: facts;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.s-facts:empty {
+  display: none;
+}
+
+.s-age {
+  grid-area: age;
+  align-self: center;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+/* ---------- Claude notifications: the settings and the animations of the board corner ---------- */
+
+/* the mode warning above "Tryb" and the Cichy hint under it keep a gap before the next group */
+#notify-mode-warn,
+#notify-quiet {
+  margin-bottom: 16px;
+}
+
+/* "Gotowe" and "Czeka na Ciebie": one block each, under a line */
+.alert {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.anims {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.anim-choice {
+  position: relative;
+  display: flex;
+}
+
+.anim-choice input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* one animation: its 64 px preview and its name, the whole tile is the touch target */
+.anim {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px 10px;
+  border-radius: 14px;
+  background: var(--fill-strong);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.anim:active {
+  transform: scale(.97);
+}
+
+.anim-choice input:checked + .anim {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.anim-choice input:focus-visible + .anim {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The previews are board pixels: opaque black on white. The big Clawd is an orange cut-out with no
+   frame (app.js, paintFrame). Neither is ever scaled smooth. */
+.anim canvas,
+.clawd-big {
+  display: block;
+  width: 64px;
+  height: 64px;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
+.anim canvas {
+  border-radius: 4px;
+  background: #FFFFFF;
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+/* ---------- Dashboard ---------- */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* No panel: Clawd and one line straight on the background. The figure fills only the middle of its
+   64 px frame (rows 9-55 across alert, typing, happy, idle and sleep), so the negative margins take back
+   the empty rows above and below it. */
+.dash-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 12px;
+  text-align: center;
+}
+
+/* 64 px frames at 2x on a phone, 3x from 600 px */
+.dash-hero .clawd-big {
+  width: 128px;
+  height: 128px;
+  margin: -18px 0 -16px;
+}
+
+@media (min-width: 600px) {
+  .dash-hero .clawd-big {
+    width: 192px;
+    height: 192px;
+    margin: -27px 0 -24px;
+  }
+}
+
+.dash-status {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.limits {
+  display: grid;
+  gap: 16px;
+}
+
+.limit-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.limit-note {
+  margin: 6px 0 0;
+}
+
+/* The track is ink at .14 over the glass, the fill is ink; from 80 % the fill turns accent, so the
+   warning is a colour and, in the text beside it, a number. */
+.bar {
+  display: block;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(var(--ink-rgb) / .14);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.bar-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--ink);
+  transition: width 400ms ease;
+}
+
+.limit[data-level="warn"] .bar-fill,
+.limit[data-level="full"] .bar-fill {
+  background: var(--accent);
+}
+
+.limit[data-level="none"] .limit-value,
+.limit[data-level="renewed"] .limit-value {
+  color: var(--muted);
+}
+
+/* ---------- sounds ---------- */
+
+.sound {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 0;
+}
+
+.sound-info {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.sound-name {
+  display: block;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.sound-meta {
+  display: block;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.sound-actions {
+  display: flex;
+  gap: 8px;
+}
+
+#preview audio {
+  display: block;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+#preview .row {
+  margin-top: 0;
+}
+
+/* ---------- wallpaper: the board screen is opaque black on white, no glass on it ---------- */
+
+.screen {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  max-width: 400px;
+  aspect-ratio: 4 / 3;
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #FFFFFF;
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.screen canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
+.screen-note {
+  color: #0D171B;
+  font-weight: 600;
+}
+
+.editor {
+  margin-top: 16px;
+}
+
+.editor > * + * {
+  margin-top: 12px;
+}
+
+.seg-field {
+  margin-bottom: 0;
+}
+
+.seg {
+  position: relative;
+  display: grid;
+  grid-auto-columns: 1fr;
+  grid-auto-flow: column;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--fill-strong);
+}
+
+.seg label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+}
+
+/* ---------- add person ---------- */
+
+/* The language choice above the title while the device has no profile: the People button is hidden
+   until then (docs/SPEC.md, "Język"). */
+.first-lang {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.add .row {
+  margin-top: 4px;
+}
+
+/* ---------- banners ---------- */
+
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  font-weight: 600;
+}
+
+.banner.mark::before {
+  margin-bottom: 0;
+}
+
+/* ---------- dialogs ---------- */
+
+dialog {
+  width: min(calc(100% - 32px), 420px);
+  max-height: calc(100% - 32px);
+  padding: 20px;
+  border: 1px solid var(--edge);
+  border-radius: 22px;
+  color: var(--ink);
+  box-shadow: inset 0 1px 0 var(--hi), 0 10px 30px var(--shadow);
+}
+
+dialog::backdrop {
+  background: var(--scrim);
+}
+
+dialog p {
+  font-weight: 600;
+}
+
+.people-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.person-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.person-row + .person-row {
+  border-top: 1px solid var(--line);
+}
+
+.person-row .switch {
+  flex: 1 1 180px;
+  justify-content: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 8px 0 6px;
+  background: transparent;
+  text-align: left;
+}
+
+.pname {
+  overflow-wrap: anywhere;
+}
+
+/* Text in dialogs stays ink: over a dark area under the scrim the muted tone would drop below 4.5:1. */
+.pnote {
+  font-weight: 400;
+  font-size: 15px;
+}
+
+.person-row .remove {
+  font-size: 15px;
+}
+
+/* App settings under the people list: the language of this device (docs/SPEC.md, "Język"). */
+.settings {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+/* The same reason as .pnote: the muted hint would drop below 4.5:1 over the scrim. */
+dialog .hint {
+  color: var(--ink);
+}
+
+/* ---------- toast ---------- */
+
+.toast {
+  position: fixed;
+  z-index: 40;
+  left: 0;
+  right: 0;
+  bottom: calc(96px + env(safe-area-inset-bottom));
+  width: max-content;
+  max-width: calc(100% - 32px);
+  margin: 0 auto;
+  padding: 12px 18px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  box-shadow: inset 0 1px 0 var(--hi), 0 10px 30px var(--shadow);
+  font-weight: 600;
+  text-align: center;
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: none;
+}
+
+@media (min-width: 768px) {
+  .toast {
+    bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ---------- fallbacks ---------- */
+
+/* No backdrop-filter, or the system asks for less transparency: opaque glass. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root {
+    --glass: var(--glass-solid);
+    --glass-nav: var(--glass-solid);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass: var(--glass-solid);
+    --glass-nav: var(--glass-solid);
+  }
+
+  .panel,
+  .top,
+  .tablist,
+  .toast,
+  dialog {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* More contrast: opaque glass and a 1 px ink edge at .5. */
+@media (prefers-contrast: more) {
+  :root {
+    --glass: var(--glass-solid);
+    --glass-nav: var(--glass-solid);
+    --edge: rgb(var(--ink-rgb) / .5);
+    --field-edge: rgb(var(--ink-rgb) / .7);
+    --line: rgb(var(--ink-rgb) / .3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  button:active:not(:disabled):not([aria-disabled="true"]),
+  .chip:active,
+  .anim:active {
+    transform: none;
+  }
+
+  /* without the spin, a dimmed button says the refresh is running */
+  #refresh.spin {
+    opacity: .55;
+  }
+}
