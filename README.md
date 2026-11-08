@@ -64,6 +64,13 @@ The app is a PWA served by the same PHP server. It runs on any phone, installs t
 
 <p align="center"><sub>Dashboard (dark and light) · Send a message · Board settings</sub></p>
 
+<p align="center">
+  <img src="docs/images/app-board-settings-light.png" width="200" alt="Board settings in light mode: the language on the board screen and the Claude notification mode (quiet, ready for more tasks, eager) and where it shows">
+  <img src="docs/images/app-board-notify-dark.png" width="200" alt="Claude notifications in dark mode: the sound and the Clawd animation the board plays when a session is done">
+</p>
+
+<p align="center"><sub>Board language and notification mode · Sound and animation for Claude notifications</sub></p>
+
 ## Highlights
 
 - **Claude Code sessions at a glance.** A hook reports each session's title, state (working, waiting, done), the reason it waits and its task-list progress.
