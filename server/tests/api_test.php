@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 $root = dirname(__DIR__);
 require "$root/sounds.php"; // pure helpers are also tested directly, without HTTP
+require "$root/push.php";
 $tmp = sys_get_temp_dir() . '/rlcd-test-' . bin2hex(random_bytes(4));
 mkdir("$tmp/data", 0700, true);
 $T = ['device' => str_repeat('d', 32), 'hook' => str_repeat('h', 32), 'u1' => str_repeat('a', 32), 'u2' => str_repeat('b', 32)];
@@ -15,12 +16,22 @@ file_put_contents("$tmp/config.php", '<?php $c = ' . var_export([
     'data_dir' => "$tmp/data",
 ], true) . ";\n"
     . 'if (is_file(__DIR__ . "/with-location")) $c["location"] = ["name" => "Dom", "lat" => 52.23, "lon" => 21.01];' . "\n"
+    . 'if (is_file(__DIR__ . "/with-push")) $c["push"] = json_decode(file_get_contents(__DIR__ . "/with-push"), true);' . "\n"
     . 'return $c;');
 
+// A stand-in for the browsers' push services: keeps what the server posts, answers 201, or 410 under /gone.
+$pushPort = random_int(40001, 50000);
+file_put_contents("$tmp/pushstub.php", '<?php $n = count(glob(__DIR__ . "/pushed-*.json"));' . "\n"
+    . 'file_put_contents(__DIR__ . "/pushed-$n.json", json_encode(["path" => $_SERVER["REQUEST_URI"], "headers" => getallheaders(), "body" => base64_encode(file_get_contents("php://input"))]));' . "\n"
+    . 'http_response_code(str_starts_with($_SERVER["REQUEST_URI"], "/gone") ? 410 : 201);');
+$null = [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']];
+$pushProc = proc_open(['php', '-S', "127.0.0.1:$pushPort", "$tmp/pushstub.php"], $null, $pushPipes, $tmp);
+
 $port = random_int(20000, 40000);
-$env = array_merge(getenv(), ['RLCD_CONFIG' => "$tmp/config.php"]);
+$env = array_merge(getenv(), ['RLCD_CONFIG' => "$tmp/config.php", 'RLCD_PUSH_ALLOW' => "http://127.0.0.1:$pushPort/"]);
 $proc = proc_open(['php', '-S', "127.0.0.1:$port", '-t', $root], [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes, $root, $env);
-register_shutdown_function(function () use ($proc, $tmp) {
+register_shutdown_function(function () use ($proc, $pushProc, $tmp) {
+    proc_terminate($pushProc);
     proc_terminate($proc);
     exec('rm -r ' . escapeshellarg($tmp));
 });
@@ -498,6 +509,159 @@ check('past its reset: expired flag, percent kept for the app to hide', $u['five
 check('older than its window: left out', !isset($u['week']));
 $rewrite(['usage' => ['five' => ['p' => 'x', 'r' => 1, 'at' => 1], 'week' => 'junk', 'hit_at' => 'now']]);
 check('a damaged usage block gives no reading', req('GET', 'a=state', $T['u1'])[1]['usage'] === ['hit' => false]);
+
+// ---------- push notifications of the app (push.php) ----------
+
+// RFC 8291, Appendix A: the same keys, salt and text must give the same bytes.
+$rfcUa = pushUnB64('BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4');
+check('encryption matches the example of RFC 8291', pushB64(pushEncrypt('When I grow up, I want to be a watermelon', $rfcUa,
+    pushUnB64('BTBZMqHH6r4Tts7J_aSIgg'), pushUnB64('DGv6ra1nlYgDCS1FRnbzlw'),
+    [pushUnB64('yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw'), pushUnB64('BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8')]))
+    === 'DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN');
+
+/** What a browser does with a push message: the text back from an aes128gcm record, or null. */
+function pushDecrypt(string $record, string $d, string $point, string $auth): ?string
+{
+    $salt = substr($record, 0, 16);
+    $sender = substr($record, 21, 65);
+    $secret = openssl_pkey_derive(pushPublicPem($sender), pushPrivatePem($d, $point));
+    $ikm = hash_hkdf('sha256', $secret, 32, "WebPush: info\0" . $point . $sender, $auth);
+    $plain = openssl_decrypt(substr($record, 86, -16), 'aes-128-gcm', hash_hkdf('sha256', $ikm, 16, "Content-Encoding: aes128gcm\0", $salt),
+        OPENSSL_RAW_DATA, hash_hkdf('sha256', $ikm, 12, "Content-Encoding: nonce\0", $salt), substr($record, -16));
+    return $plain === false ? null : rtrim($plain, "\x02");
+}
+/** True when the VAPID token is an ES256 JWT signed by the key $point, for $audience, not yet expired. */
+function vapidOk(string $jwt, string $point, string $audience): bool
+{
+    [$h, $c, $sig] = explode('.', $jwt) + ['', '', ''];
+    $raw = (string)pushUnB64($sig);
+    $int = function (string $x): string {
+        $x = ltrim($x, "\0");
+        $x = (ord($x[0] ?? "\0") & 0x80 ? "\0" : '') . $x;
+        return "\x02" . chr(strlen($x)) . $x;
+    };
+    $der = $int(substr($raw, 0, 32)) . $int(substr($raw, 32));
+    $claims = json_decode((string)pushUnB64($c), true);
+    return strlen($raw) === 64 && openssl_verify("$h.$c", "\x30" . chr(strlen($der)) . $der, pushPublicPem($point), OPENSSL_ALGO_SHA256) === 1
+        && ($claims['aud'] ?? '') === $audience && ($claims['exp'] ?? 0) > time() && ($claims['exp'] ?? 0) <= time() + 86400
+        && str_starts_with($claims['sub'] ?? '', 'mailto:');
+}
+
+check('a new state is an event, the same state is not', pushEvent(null, 'working') === 'working' && pushEvent('done', 'working') === 'working'
+    && pushEvent('waiting', 'working') === 'update' && pushEvent('working', 'waiting') === 'waiting' && pushEvent('working', 'done') === 'done'
+    && pushEvent(null, 'done') === 'update' && pushEvent('working', 'end') === 'update'
+    && pushEvent('working', 'working') === null && pushEvent(null, 'end') === null);
+$rows = [
+    ['id' => 's:aaaa0001', 'alias' => 'blog', 'title' => 'Nowy wpis', 'state' => 'working', 'tasks' => ['d' => 2, 't' => 5]],
+    ['id' => 's:aaaa0002', 'alias' => 'api', 'title' => '', 'state' => 'waiting', 'kind' => 'question'],
+    ['id' => 's:aaaa0003', 'alias' => 'docs', 'title' => str_repeat('ż', 40), 'state' => 'done'],
+];
+check('the text names the event and lists the sessions by state', pushText('pl', 'waiting', 's:aaaa0002', $rows)
+    === ['Czeka na Ciebie: api', "W toku (1): Nowy wpis 2/5\nCzeka (1): api (pytanie)\nGotowe (1): " . str_repeat('ż', 31) . '…']);
+check('a quiet update and an unknown language', pushText('xx', 'update', 's:aaaa0001', $rows)[0] === 'Claude sessions'
+    && pushText('en', 'test', null, []) === ['Notifications work', 'No Claude sessions right now.']);
+$quietSub = ['lang' => 'pl', 'prefs' => ['working' => false, 'waiting' => true, 'done' => true, 'sound' => false]];
+$pl = fn(string $event) => json_decode(pushPayload($quietSub, $event, 's:aaaa0001', $rows, 7), true);
+check('a device is alerted only about what it chose, and silently with sound off', $pl('working')['alert'] === false && $pl('working')['silent'] === true
+    && $pl('done')['alert'] === true && $pl('done')['silent'] === true && $pl('update')['alert'] === false && $pl('done')['rev'] === 7);
+check('with sound on an alert is not silent, a quiet update still is', (function () use ($quietSub, $rows) {
+    $sub = ['prefs' => ['sound' => true] + $quietSub['prefs']] + $quietSub;
+    return json_decode(pushPayload($sub, 'done', null, $rows, 1), true)['silent'] === false
+        && json_decode(pushPayload($sub, 'working', null, $rows, 1), true)['silent'] === true;
+})());
+check('only known push services are endpoints', pushEndpointOk('https://fcm.googleapis.com/fcm/send/abc') && pushEndpointOk('https://updates.push.services.mozilla.com/wpush/v2/x')
+    && pushEndpointOk('https://web.push.apple.com/x') && !pushEndpointOk('http://fcm.googleapis.com/x') && !pushEndpointOk('https://example.com/x')
+    && !pushEndpointOk('https://fcm.googleapis.com.evil.example/x') && !pushEndpointOk('https://evilfcm.googleapis.com@127.0.0.1/x')
+    && !pushEndpointOk('https://fcm.googleapis.com:8443/x') && !pushEndpointOk(null) && !pushEndpointOk('https://fcm.googleapis.com/' . str_repeat('a', 1100)));
+
+// over HTTP: off without keys, then on
+[$c, $info] = req('GET', 'a=push', $T['u1']);
+check('push off without keys: the app gets the reason, not an error', $c === 200 && $info['available'] === false && str_contains($info['reason'], 'tools/push-keys.php'));
+[$vd, $vpoint] = pushNewKey();
+[$ud, $upoint] = pushNewKey(); // the "browser"
+$uauth = random_bytes(16);
+$browser = fn(string $path, array $prefs = []) => json_encode(['endpoint' => "http://127.0.0.1:$pushPort/$path",
+    'keys' => ['p256dh' => pushB64($upoint), 'auth' => pushB64($uauth)], 'lang' => 'pl',
+    'prefs' => $prefs + ['working' => false, 'waiting' => true, 'done' => true, 'sound' => true]]);
+check('subscribing while push is off -> 503', req('POST', 'a=push', $T['u1'], $browser('one'))[0] === 503);
+file_put_contents("$tmp/with-push", json_encode(['public' => pushB64($vpoint), 'private' => pushB64($vd), 'subject' => '']));
+check('keys without a contact address keep push off', str_contains(req('GET', 'a=push', $T['u1'])[1]['reason'] ?? '', 'push.subject'));
+file_put_contents("$tmp/with-push", json_encode(['public' => pushB64($upoint), 'private' => pushB64($vd), 'subject' => 'mailto:test@example.com']));
+check('keys that do not belong together keep push off', str_contains(req('GET', 'a=push', $T['u1'])[1]['reason'] ?? '', 'do not belong together'));
+file_put_contents("$tmp/with-push", json_encode(['public' => pushB64($vpoint), 'private' => pushB64($vd), 'subject' => 'mailto:test@example.com']));
+[$c, $info] = req('GET', 'a=push', $T['u1']);
+check('push on: the app gets the public key and never the private one', $c === 200 && $info === ['ok' => true, 'available' => true, 'key' => pushB64($vpoint)]);
+check('push actions need a user token', req('GET', 'a=push', $T['hook'])[0] === 401 && req('POST', 'a=push', $T['device'], $browser('one'))[0] === 401);
+check('an endpoint outside the push services is refused', req('POST', 'a=push', $T['u1'], json_encode(['endpoint' => 'https://example.com/x'] + json_decode($browser('one'), true)))[0] === 400);
+check('broken browser keys are refused', req('POST', 'a=push', $T['u1'], json_encode(['keys' => ['p256dh' => 'AAAA', 'auth' => pushB64($uauth)]] + json_decode($browser('one'), true)))[0] === 400);
+check('choices must be complete booleans', req('POST', 'a=push', $T['u1'], json_encode(['prefs' => ['done' => 1]] + json_decode($browser('one'), true)))[0] === 400);
+check('an unknown language is refused', req('POST', 'a=push', $T['u1'], json_encode(['lang' => 'de'] + json_decode($browser('one'), true)))[0] === 400);
+check('nothing refused was stored', !is_file("$tmp/data/push.json"));
+check('a browser subscribes', req('POST', 'a=push', $T['u1'], $browser('one'))[0] === 200);
+req('POST', 'a=push', $T['u2'], $browser('one', ['working' => true]));
+$stored = json_decode(file_get_contents("$tmp/data/push.json"), true)['subs'];
+check('the same endpoint again updates its record', count($stored) === 1 && $stored[0]['prefs']['working'] === true && $stored[0]['name'] === 'Ola');
+check('subscriptions never show in state', !str_contains(req('GET', 'a=state', $T['u1'])[2], 'p256dh') && !str_contains(req('GET', 'a=state', $T['u1'])[2], "127.0.0.1:$pushPort"));
+
+$pushed = function () use ($tmp, $ud, $upoint, $uauth): array { // what the stand-in got since the last call, decrypted
+    $out = [];
+    foreach (glob("$tmp/pushed-*.json") as $f) {
+        $m = json_decode(file_get_contents($f), true);
+        $m['json'] = json_decode((string)pushDecrypt(base64_decode($m['body']), $ud, $upoint, $uauth), true);
+        $out[] = $m;
+        rename($f, "$f.seen");
+    }
+    return $out;
+};
+$sess = fn(string $state, array $more = []) => req('POST', 'a=session', $T['hook'], json_encode(['alias' => 'pushy', 'sid' => 'eeee0001', 'title' => 'Push test', 'state' => $state] + $more));
+$pushed();
+$sess('working', ['turns' => 1]);
+$got = $pushed();
+$h = array_change_key_case($got[0]['headers'] ?? []);
+check('a session that starts working reaches the phone, encrypted for it', count($got) === 1 && $got[0]['path'] === '/one'
+    && $got[0]['json']['title'] === 'Pracuje: Push test' && $got[0]['json']['alert'] === true && str_contains($got[0]['json']['body'], 'W toku'));
+check('the push request carries VAPID, TTL and the topic', ($h['content-encoding'] ?? '') === 'aes128gcm' && ($h['ttl'] ?? '') === '3600' && ($h['topic'] ?? '') === 'claude'
+    && preg_match('/^vapid t=([\w.-]+), k=([\w-]+)$/', $h['authorization'] ?? '', $m) === 1 && $m[2] === pushB64($vpoint)
+    && vapidOk($m[1], $vpoint, "http://127.0.0.1:$pushPort"));
+$sess('working', ['turns' => 1, 'tasks' => ['d' => 1, 't' => 3]]);
+$got = $pushed();
+check('task progress within the same state updates the status quietly', count($got) === 1 && $got[0]['json']['alert'] === false
+    && $got[0]['json']['silent'] === true && str_contains($got[0]['json']['body'], 'Push test 1/3'));
+$sess('working', ['turns' => 1, 'tasks' => ['d' => 1, 't' => 3], 'agents' => 2]);
+check('a change the status does not show sends nothing', $pushed() === []);
+$sess('waiting', ['turns' => 1, 'kind' => 'plan', 'tasks' => ['d' => 1, 't' => 3]]);
+$got = $pushed();
+check('waiting alerts with the kind and the progress', count($got) === 1 && $got[0]['json']['title'] === 'Czeka na Ciebie: Push test'
+    && str_contains($got[0]['json']['body'], 'Push test 1/3 (plan)') && ($h2 = array_change_key_case($got[0]['headers']))['urgency'] === 'high');
+$sess('working', ['turns' => 1]);
+$got = $pushed();
+check('an answered question updates quietly', count($got) === 1 && $got[0]['json']['alert'] === false && $got[0]['json']['silent'] === true
+    && $got[0]['json']['title'] === 'Sesje Claude' && array_change_key_case($got[0]['headers'])['urgency'] === 'normal');
+$sess('done', ['turns' => 1]);
+$got = $pushed();
+check('done alerts and carries the rev of the state', count($got) === 1 && $got[0]['json']['title'] === 'Gotowe: Push test'
+    && $got[0]['json']['rev'] === req('GET', 'a=state', $T['u1'])[1]['rev'] && $got[0]['json']['silent'] === false);
+check('a test push goes to the asking browser only', req('POST', 'a=push_test', $T['u1'], json_encode(['endpoint' => "http://127.0.0.1:$pushPort/one"]))[0] === 200
+    && ($got = $pushed()) !== [] && $got[0]['json']['title'] === 'Powiadomienia działają' && $got[0]['json']['alert'] === true);
+check('a test push for an unknown browser -> 404', req('POST', 'a=push_test', $T['u1'], json_encode(['endpoint' => "http://127.0.0.1:$pushPort/nobody"]))[0] === 404);
+req('POST', 'a=push', $T['u1'], $browser('gone/two'));
+$sess('working', ['turns' => 2]);
+$left = array_column(json_decode(file_get_contents("$tmp/data/push.json"), true)['subs'], 'endpoint');
+check('a browser its push service no longer knows (410) is forgotten', count($pushed()) === 2 && $left === ["http://127.0.0.1:$pushPort/one"]);
+check('unsubscribing removes the record', req('POST', 'a=push_delete', $T['u1'], json_encode(['endpoint' => "http://127.0.0.1:$pushPort/one"]))[0] === 200
+    && json_decode(file_get_contents("$tmp/data/push.json"), true)['subs'] === []);
+$sess('done', ['turns' => 2]);
+check('without subscribers nothing is sent', $pushed() === []);
+for ($i = 0; $i < PUSH_MAX + 2; $i++) {
+    req('POST', 'a=push', $T['u1'], $browser("many$i"));
+}
+$ends = array_column(json_decode(file_get_contents("$tmp/data/push.json"), true)['subs'], 'endpoint');
+check('at most PUSH_MAX browsers, the oldest gives way', count($ends) === PUSH_MAX && str_ends_with($ends[0], '/many2') && str_ends_with(end($ends), '/many' . (PUSH_MAX + 1)));
+file_put_contents("$tmp/data/push.json", '{broken');
+check('a damaged push.json: the hook still gets its answer, the app gets the reason', $sess('working', ['turns' => 3])[0] === 200
+    && req('POST', 'a=push', $T['u1'], $browser('one'))[0] === 500 && file_get_contents("$tmp/data/push.json") === '{broken');
+unlink("$tmp/data/push.json");
+$sess('end');
 
 // corrupt state fails closed
 file_put_contents("$tmp/data/state.json", '{broken');

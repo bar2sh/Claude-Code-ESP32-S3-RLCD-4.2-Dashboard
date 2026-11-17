@@ -17,6 +17,10 @@ return [
     // every other browser gets 404. Delete data/devices.json to free the places. The board, the hook
     // and the terminal are not affected.
     'app_lock' => ['devices' => 0],
+    // Push notifications of the app on the phone (Claude sessions: working, waiting, done). Leave the keys
+    // empty to keep push off. Make them with:  php tools/push-keys.php
+    // subject is your contact for the push service: 'mailto:you@example.com' or an https:// address.
+    'push' => ['public' => '', 'private' => '', 'subject' => ''],
     // Optional: a folder outside public_html is even safer, e.g. '/home/USER/rlcd-data'
     'data_dir' => __DIR__ . '/data',
 ];

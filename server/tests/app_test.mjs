@@ -14,6 +14,7 @@ import * as dash from '../lib/dash.js';
 import * as api from '../lib/api.js';
 import * as dither from '../lib/dither.js';
 import * as i18n from '../lib/i18n.js';
+import * as push from '../lib/push.js';
 import * as text from '../lib/text.js';
 import * as wav from '../lib/wav.js';
 
@@ -24,7 +25,7 @@ const ROOT = dirname(SERVER);
 const API_PHP = join(SERVER, 'api.php');
 const SOUNDS_PHP = join(SERVER, 'sounds.php');
 const TOOLS = join(ROOT, 'tools');
-const LIBS = { 'anim.js': anim, 'api.js': api, 'dash.js': dash, 'dither.js': dither, 'i18n.js': i18n, 'text.js': text, 'wav.js': wav };
+const LIBS = { 'anim.js': anim, 'api.js': api, 'dash.js': dash, 'dither.js': dither, 'i18n.js': i18n, 'push.js': push, 'text.js': text, 'wav.js': wav };
 
 const read = (...parts) => readFileSync(join(SERVER, ...parts), 'utf8');
 const apiSrc = readFileSync(API_PHP, 'utf8');
@@ -845,6 +846,115 @@ await section('anim.js: the board animations and the notification settings', () 
 
 // ---------- i18n.js ----------
 
+// ---------- push.js ----------
+
+await section('push.js: push choices of this device and the subscription the server gets', async () => {
+  const pushSrc = readFileSync(join(SERVER, 'push.php'), 'utf8');
+  same('the same events as push.php', push.PUSH_EVENTS, phpList('PUSH_EVENTS', pushSrc));
+  const phpDefaults = Object.fromEntries([.../const PUSH_PREFS = \[([^\]]*)\]/.exec(pushSrc)[1].matchAll(/'(\w+)' => (true|false)/g)]
+    .map((m) => [m[1], m[2] === 'true']));
+  same('the same default choices as push.php', { ...push.PUSH_DEFAULTS }, phpDefaults);
+  same('the notification tag is the same in sw.js and push.php', /const PUSH_TAG = '([^']+)'/.exec(read('sw.js'))?.[1],
+    /const PUSH_TAG = '([^']+)'/.exec(pushSrc)?.[1]);
+  const html = read('index.html');
+  same('the settings offer exactly the events', [...html.matchAll(/name="push-event" value="([^"]+)"/g)].map((m) => m[1]).sort(),
+    [...push.PUSH_EVENTS].sort());
+
+  same('choices: only booleans count, the rest falls back', push.pushPrefs({ working: true, waiting: 'no', done: 0, extra: true }),
+    { working: true, waiting: true, done: true, sound: true });
+  const store = fakeStorage();
+  check('choices are kept on the device', push.savePushPrefs({ ...push.PUSH_DEFAULTS, sound: false }, store)
+    && push.loadPushPrefs(store).sound === false && push.loadPushPrefs(store).done === true);
+  same('damaged or unreadable choices give the defaults', [push.loadPushPrefs(fakeStorage({ [push.PUSH_KEY]: '{broken' })),
+    push.loadPushPrefs(fakeStorage({}, { readFails: true }))], [{ ...push.PUSH_DEFAULTS }, { ...push.PUSH_DEFAULTS }]);
+  check('a browser that drops the write says so', !push.savePushPrefs(push.PUSH_DEFAULTS, fakeStorage({}, { writeFails: true }))
+    && !push.savePushPrefs({ ...push.PUSH_DEFAULTS, sound: false }, fakeStorage({}, { dropsWrites: true })));
+
+  const key = 'BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8'; // RFC 8291, a public key
+  const bytes = push.pushKeyBytes(key);
+  check('the server key becomes 65 bytes', bytes instanceof Uint8Array && bytes.length === 65 && bytes[0] === 4
+    && Buffer.from(bytes).toString('base64url') === key);
+  same('anything else is not a key', [push.pushKeyBytes(''), push.pushKeyBytes(null), push.pushKeyBytes('AAAA'), push.pushKeyBytes(key + '='),
+    push.pushKeyBytes('A' + key.slice(1))], [null, null, null, null, null]);
+
+  const sub = { endpoint: 'https://fcm.googleapis.com/fcm/send/x', expirationTime: null, keys: { p256dh: 'p', auth: 'a' } };
+  same('the body holds exactly what the server reads', push.pushBody(sub, 'pl', { done: false }),
+    { endpoint: sub.endpoint, keys: { p256dh: 'p', auth: 'a' }, lang: 'pl', prefs: { ...push.PUSH_DEFAULTS, done: false } });
+  same('no endpoint or keys: no body', [push.pushBody(null, 'pl', {}), push.pushBody({ endpoint: 'x' }, 'pl', {}),
+    push.pushBody({ keys: sub.keys }, 'pl', {})], [null, null, null]);
+
+  const env = (permission, more = {}) => ({ isSecureContext: true, navigator: { serviceWorker: {} }, PushManager: {}, Notification: { permission }, ...more });
+  same('why push cannot be on here', [push.pushSupport(env('default')), push.pushSupport(env('granted')), push.pushSupport(env('denied')),
+    push.pushSupport(env('default', { isSecureContext: false })), push.pushSupport({ isSecureContext: true, navigator: {} })],
+    ['ok', 'ok', 'denied', 'insecure', 'unsupported']);
+
+  // the reasons push.php gives for "off" read as sentences in every language
+  const reasons = [...pushSrc.matchAll(/\$off\('([^']+)'\)/g)].map((m) => m[1]);
+  await inEachLang((code) => {
+    const raw = reasons.filter((msg) => api.translateError(msg, 200) === i18n.t('api.raw', { msg, status: 200 }));
+    check(`${code}: every reason for push being off has a sentence (${reasons.length})`, reasons.length >= 4 && raw.length === 0, raw.join(' | '));
+  });
+  const seen = [];
+  const client = api.createApi({ token: 'x'.repeat(24), fetch: async (url, init) => {
+    seen.push([url, init.method, init.body]);
+    return { ok: true, status: 200, headers: new Map(), json: async () => (url.includes('a=push&') || url.endsWith('a=push')) && init.method === 'GET'
+      ? { ok: true, available: false, reason: reasons[1] } : { ok: true } };
+  } });
+  const info = await client.pushInfo();
+  check('push off: the reason arrives as a sentence, not as an error', info.available === false && info.reason === i18n.t('api.pushNotSetUp'));
+  await client.pushTest('https://fcm.googleapis.com/x');
+  await client.pushDelete('https://fcm.googleapis.com/x');
+  same('the endpoint travels in the body, never in the address', seen.slice(1),
+    [['api.php?a=push_test', 'POST', '{"endpoint":"https://fcm.googleapis.com/x"}'], ['api.php?a=push_delete', 'POST', '{"endpoint":"https://fcm.googleapis.com/x"}']]);
+});
+
+await section('sw.js: the push notification', async () => {
+  const { runInNewContext } = await import('node:vm');
+  const handlers = {};
+  const shown = []; // every showNotification call: [title, options]
+  let onScreen = [];
+  const opened = [];
+  const self = {
+    location: new URL('https://example.test/app/sw.js'),
+    addEventListener: (type, fn) => { handlers[type] = fn; },
+    registration: {
+      scope: 'https://example.test/app/',
+      getNotifications: async () => onScreen,
+      showNotification: async (title, options) => {
+        shown.push([title, options]);
+        onScreen = [{ title, body: options.body, data: options.data, timestamp: options.timestamp }];
+      },
+    },
+    clients: { matchAll: async () => [], openWindow: async (url) => { opened.push(url); } },
+  };
+  runInNewContext(read('sw.js'), { self, URL, caches: {}, Request: class {}, fetch: async () => ({}) });
+  const fire = async (payload) => {
+    let done;
+    handlers.push({ data: payload === null ? null : { json: () => (typeof payload === 'string' ? JSON.parse(payload) : payload) }, waitUntil: (p) => { done = p; } });
+    await done;
+    return shown.at(-1);
+  };
+  const [title, o] = await fire({ v: 1, title: 'Gotowe: blog', body: 'Gotowe (1): blog', alert: true, silent: false, rev: 9, ts: 1000 });
+  same('an alert: the server text, one tag, announced with sound', [title, o.body, o.tag, o.renotify, o.silent, o.data.rev, o.timestamp],
+    ['Gotowe: blog', 'Gotowe (1): blog', 'claude', true, false, 9, 1000]);
+  const [, quiet] = await fire({ v: 1, title: 'Sesje Claude', body: 'W toku (1): blog', alert: false, silent: true, rev: 10, ts: 2000 });
+  same('a quiet update replaces the text without a new alert', [quiet.body, quiet.renotify, quiet.silent], ['W toku (1): blog', false, true]);
+  const [oldTitle, old] = await fire({ v: 1, title: 'Gotowe: blog', body: 'stale', alert: true, silent: false, rev: 9, ts: 1000 });
+  same('a status older than the one on screen repeats the one on screen, quietly', [oldTitle, old.body, old.renotify, old.silent, old.data.rev],
+    ['Sesje Claude', 'W toku (1): blog', false, true, 10]);
+  const before = shown.length;
+  const [, broken] = await fire('{broken');
+  check('a broken payload still ends in a notification, a silent one', shown.length === before + 1 && broken.silent === true && broken.renotify === false);
+  onScreen = [];
+  const [emptyTitle, empty] = await fire(null);
+  check('a push without data on an empty screen shows a silent placeholder', emptyTitle !== '' && empty.silent === true && empty.tag === 'claude');
+  let closed = false;
+  let clicked;
+  handlers.notificationclick({ notification: { close: () => { closed = true; } }, waitUntil: (p) => { clicked = p; } });
+  await clicked;
+  same('a tap closes the notification and opens the app', [closed, opened], [true, ['./']]);
+});
+
 await section('dash.js: limits and session facts the Dashboard shows', () => {
   const r = (extra = {}) => ({ p: 63.4, left: 4800, age: 120, expired: false, ...extra });
   same('no reading: none', dash.limitBar(undefined), { kind: 'none' });
@@ -1065,6 +1175,7 @@ await section('deploy: offline files, icons, CSP-safe markup', () => {
     'tablica-v8': '407557728890df01c6f07beda4f1200d02cddc5cb7d8e0ee197736f358f515ff',
     'tablica-v9': '3883ed1fc6e9969a4a36e5014720a324c7d4224bc51008a12efc874d19c7ed60',
     'tablica-v10': '5440c6a010ec4c9ee09d7489d254edffd53556c189cc953c2524d19319c40b85',
+    'tablica-v11': '34802c04cb395c5530c9ad98d923258768285c31bd8f0692ac2263f4f383700a',
   };
   const sha = (data) => createHash('sha256').update(data).digest('hex');
   const digest = sha(kept.filter((f) => f !== './').map((f) => `${f} ${sha(readFileSync(join(SERVER, f)))}\n`).join(''));

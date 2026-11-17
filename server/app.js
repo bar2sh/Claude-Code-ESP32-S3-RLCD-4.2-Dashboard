@@ -13,6 +13,7 @@ import { MAX_INPUT_BYTES, MAX_SECONDS, SoundError, convertToWav } from './lib/wa
 import { BYTES, H, W, rgbaToWallpaper, wallpaperToRgba } from './lib/dither.js';
 import { ANIMS, SIZE as ANIM_SIZE, animById, dashboardAnim, frameToCutout, frameToRgba } from './lib/anim.js';
 import { limitBar, sessionFacts, span, taskProgress, waitKind } from './lib/dash.js';
+import { PUSH_EVENTS, loadPushPrefs, pushBody, pushKeyBytes, pushSupport, savePushPrefs } from './lib/push.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -93,6 +94,8 @@ const S = {
   blobs: new Map(), // sound id -> blob: URL
   playing: null, // {id, btn, where}
   waiting: null, // a service worker with a new version
+  // push on this device: state is checking, on, off, denied, unsupported, insecure, noProfile or unavailable (with reason)
+  push: { state: 'checking', reason: '', error: '', key: null, endpoint: null, prefs: loadPushPrefs(), saving: false, synced: false },
 };
 
 const player = new Audio();
@@ -298,6 +301,7 @@ function activate(id) {
   renderPerson();
   hideAdd();
   refresh();
+  syncPush();
   return saved;
 }
 
@@ -423,6 +427,7 @@ async function onAddSubmit(e) {
 function openPeople() {
   renderPeople();
   openDialog($('people'));
+  checkPush();
 }
 
 function renderPeople() {
@@ -1801,6 +1806,206 @@ async function onWallSend() {
   }, t('busy.sending'));
 }
 
+// ---------- push notifications of this device (lib/push.js; People → Settings) ----------
+
+const PUSH_STATUS = {
+  checking: 'push.status.checking',
+  on: 'push.status.on',
+  off: 'push.status.off',
+  denied: 'push.status.denied',
+  unsupported: 'push.status.unsupported',
+  insecure: 'push.status.insecure',
+  noProfile: 'push.status.noProfile',
+};
+
+/** The browser's push subscription, or null; also null when the service worker never registered. */
+async function pushSubscription() {
+  const reg = await navigator.serviceWorker.getRegistration();
+  return reg ? reg.pushManager.getSubscription() : null;
+}
+
+function renderPush() {
+  const P = S.push;
+  $('push-status').textContent = P.state === 'unavailable' ? P.reason : ui(t(PUSH_STATUS[P.state]));
+  const toggle = $('push-toggle');
+  toggle.hidden = P.state !== 'on' && P.state !== 'off';
+  if (!busy.has(toggle)) toggle.textContent = ui(t(P.state === 'on' ? 'push.disable' : 'push.enable'));
+  toggle.classList.toggle('primary', P.state !== 'on');
+  $('push-form').hidden = P.state !== 'on';
+  for (const box of $('push-events').querySelectorAll('input[name="push-event"]')) box.checked = P.prefs[box.value] === true;
+  $('push-sound').checked = P.prefs.sound;
+  $('push-sound-system').textContent = ui(t('push.soundSystem', { name: t('app.name') }));
+  $('push-error').textContent = P.error;
+}
+
+/** Where push stands on this device and on the server; runs every time the settings open. */
+async function checkPush() {
+  const api = S.api;
+  const P = S.push;
+  P.error = '';
+  const support = pushSupport();
+  P.state = support !== 'ok' ? support : api ? 'checking' : 'noProfile';
+  renderPush();
+  if (P.state !== 'checking') return;
+  try {
+    const info = await api.pushInfo();
+    if (api !== S.api) return;
+    if (!info.available) {
+      P.state = 'unavailable';
+      P.reason = ui(info.reason);
+    } else {
+      P.key = info.key;
+      const sub = await pushSubscription();
+      P.endpoint = sub ? sub.endpoint : null;
+      P.state = sub ? 'on' : 'off';
+    }
+  } catch (e) {
+    if (api !== S.api) return;
+    P.state = 'unavailable';
+    P.reason = e instanceof ApiError && e.offline ? ui(t('offline')) : errorMessage(e);
+  }
+  renderPush();
+}
+
+/** Asks for the permission (this needs the tap), subscribes the browser and hands the subscription to the server. */
+async function enablePush() {
+  const api = S.api;
+  const P = S.push;
+  const key = pushKeyBytes(P.key);
+  if (!api || !key) {
+    P.error = ui(t('push.badKey'));
+    return;
+  }
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') {
+    if (permission === 'denied') P.state = 'denied';
+    P.error = ui(t('push.refused'));
+    return;
+  }
+  const reg = await navigator.serviceWorker.getRegistration();
+  if (!reg) {
+    P.state = 'unsupported';
+    return;
+  }
+  const options = { userVisibleOnly: true, applicationServerKey: key };
+  let sub;
+  try {
+    sub = await reg.pushManager.subscribe(options);
+  } catch (first) {
+    // a subscription made with keys the server no longer has blocks a new one: drop it and try once more
+    const old = await reg.pushManager.getSubscription().catch(() => null);
+    if (!old) throw first;
+    await old.unsubscribe();
+    sub = await reg.pushManager.subscribe(options);
+  }
+  const body = pushBody(sub.toJSON(), lang(), P.prefs);
+  try {
+    if (!body) throw new Error('no endpoint');
+    await api.pushSave(body);
+  } catch (e) {
+    await sub.unsubscribe().catch(() => {}); // never subscribed in the browser but unknown to the server
+    throw e;
+  }
+  P.endpoint = sub.endpoint;
+  P.state = 'on';
+  toast(t('push.enabled'));
+}
+
+/** The browser stops listening first, so push ends even without a connection; the server then forgets the address. */
+async function disablePush() {
+  const api = S.api;
+  const P = S.push;
+  const sub = await pushSubscription();
+  if (sub) {
+    await sub.unsubscribe();
+    if (api) await api.pushDelete(sub.endpoint).catch(() => {}); // an address the push service rejects is dropped anyway
+  }
+  P.endpoint = null;
+  P.state = 'off';
+  toast(t('push.disabled'));
+}
+
+function onPushToggle() {
+  const P = S.push;
+  const turnOn = P.state === 'off';
+  if (!turnOn && P.state !== 'on') return;
+  withBusy($('push-toggle'), async () => {
+    P.error = '';
+    try {
+      await (turnOn ? enablePush() : disablePush());
+    } catch (e) {
+      P.error = e instanceof ApiError ? ui(e.message) : ui(t('push.failed', { detail: e && e.message ? e.message : String(e) }));
+    }
+    renderPush();
+  }, t('busy.saving')).then(renderPush);
+}
+
+/** A changed choice is saved at once, on this device and on the server; a refused save puts the old choice back. */
+async function onPushChange(e) {
+  const box = e.target;
+  const P = S.push;
+  if (!(box instanceof HTMLInputElement) || box.type !== 'checkbox' || P.saving) {
+    renderPush();
+    return;
+  }
+  const before = P.prefs;
+  const field = box.id === 'push-sound' ? 'sound' : PUSH_EVENTS.includes(box.value) ? box.value : null;
+  if (!field) return;
+  P.prefs = { ...before, [field]: box.checked };
+  P.error = '';
+  P.saving = true;
+  for (const id of ['push-events', 'push-sound-box']) $(id).setAttribute('aria-busy', 'true');
+  try {
+    const sub = await pushSubscription();
+    const body = sub ? pushBody(sub.toJSON(), lang(), P.prefs) : null;
+    if (!S.api || !body) throw new ApiError(t('api.pushGone'), { status: 404 });
+    await S.api.pushSave(body);
+    if (!savePushPrefs(P.prefs)) P.error = ui(t('push.notSaved'));
+    else toast(t('push.saved'));
+  } catch (err) {
+    P.prefs = before;
+    if (err instanceof ApiError && err.status === 404) await checkPush(); // the subscription is gone: show push as off
+    P.error = errorMessage(err);
+  } finally {
+    P.saving = false;
+    for (const id of ['push-events', 'push-sound-box']) $(id).removeAttribute('aria-busy');
+  }
+  renderPush();
+}
+
+function onPushTest() {
+  const P = S.push;
+  withBusy($('push-test'), async () => {
+    P.error = '';
+    try {
+      const sub = await pushSubscription();
+      if (!S.api || !sub) throw new ApiError(t('api.pushGone'), { status: 404 });
+      await S.api.pushTest(sub.endpoint);
+      toast(t('push.testSent'));
+    } catch (e) {
+      P.error = errorMessage(e);
+    }
+    renderPush();
+  }, t('busy.sending'));
+}
+
+/**
+ * Once per app start: a subscribed browser hands its subscription in again, so the server follows a changed
+ * app language and an address the browser renewed on its own. Quiet: push problems show in the settings.
+ */
+async function syncPush() {
+  const api = S.api;
+  if (S.push.synced || !api || pushSupport() !== 'ok' || Notification.permission !== 'granted') return;
+  S.push.synced = true;
+  try {
+    const sub = await pushSubscription();
+    const body = sub ? pushBody(sub.toJSON(), lang(), S.push.prefs) : null;
+    if (body) await api.pushSave(body);
+  } catch {
+    // offline or push switched off on the server
+  }
+}
+
 // ---------- service worker ----------
 
 function registerWorker() {
@@ -1959,6 +2164,9 @@ function bind() {
   });
   $('people-close').addEventListener('click', () => closeDialog($('people')));
   for (const picker of LANG_PICKERS) $(picker.box).addEventListener('change', (e) => onLang(picker, e));
+  $('push-toggle').addEventListener('click', onPushToggle);
+  $('push-form').addEventListener('change', onPushChange);
+  $('push-test').addEventListener('click', onPushTest);
 
   // the server is asked only while the app is on screen
   document.addEventListener('visibilitychange', () => {

@@ -121,6 +121,25 @@ Blokada wpuszcza do aplikacji PWA tylko kilka przeglądarek. Miejsca zajmują pi
    Okno prywatne pokaże wtedy „Not Found”. W `data/devices.json` (zobaczysz go przez FTP) jest tyle wpisów, ile miejsc, z imionami osób.
 5. Żeby zwolnić miejsca, usuń przez FTP `data/devices.json`. Przeglądarki z zapisanym profilem zajmą je znowu przy najbliższym zapytaniu. Przy wymianie urządzenia najpierw usuń na starym profil („Osoby” → „Usuń z tego urządzenia”).
 
+### Powiadomienia push na telefonie (opcjonalnie)
+
+Telefon pokazuje jedno powiadomienie ze stanem sesji Claude: w toku, czeka, gotowe. Szczegóły są w `docs/SPEC.md`, w rozdziale „Powiadomienia push”. Hosting potrzebuje rozszerzeń PHP `openssl` i `curl`.
+
+1. Na komputerze utwórz klucze:
+   ```bash
+   php tools/push-keys.php
+   ```
+2. Wklej wynik do `config.php` na serwerze i wpisz w `subject` swój adres kontaktowy dla usługi push, np. `'mailto:ty@example.com'`. Klucz `private` nie może trafić do repozytorium ani nigdzie indziej.
+3. Wgraj przez FTP w tej kolejności: `push.php`, `api.php`, `applock.php`, `.htaccess`, `index.html`, `app.css`, `app.js`, `lib/api.js`, `lib/i18n.js`, `lib/push.js`, na końcu `sw.js`. `api.php` potrzebuje `push.php`, więc bez niego serwer odpowiada błędem.
+4. Sprawdź, że `push.php` nie da się pobrać. Wynik `403` albo `404` jest w porządku:
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' "${RLCD_URL%api.php}push.php"
+   ```
+5. Na telefonie otwórz zainstalowaną aplikację, przyjmij „Nowa wersja”, wejdź w Osoby → Ustawienia → „Powiadomienia push” i wybierz „Włącz na tym urządzeniu”. Potem „Wyślij powiadomienie testowe”.
+6. Ton i wibracje ustawia Android: Ustawienia → Aplikacje → Tablica → Powiadomienia. Aplikacja WWW nie może dać własnego dźwięku; w aplikacji wybierasz tylko, czy powiadomienie ma dźwięk i o czym powiadamia.
+
+Nowe klucze z `push-keys.php` kończą wszystkie zapisy: każdy telefon włącza push od nowa.
+
 ## 2. Płytka
 
 Potrzebne jest ESP-IDF 5.5, np. w `~/esp/esp-idf`, i Wi-Fi 2.4 GHz z dostępem do internetu. Płytce wystarczy DNS i HTTPS do hostingu. Izolacja klientów w sieci IoT nie przeszkadza. Zegar ustawia się z czasu serwera, więc NTP (usługa synchronizacji czasu) też nie jest potrzebne.

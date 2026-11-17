@@ -62,6 +62,17 @@ const EXACT = new Map([
   ['WAV needs a fmt and a data chunk', 'api.wavParts'],
   ['WAV has no whole 16-bit samples', 'api.wavSamples'],
   ['sound is longer than 15 s', 'api.tooLong'],
+  // push.php and the push actions of api.php
+  ['push needs the PHP extensions openssl and curl on this hosting', 'api.pushNoExt'],
+  ['push is not set up: run tools/push-keys.php and copy its output into config.php', 'api.pushNotSetUp'],
+  ['push keys in config.php are broken: run tools/push-keys.php again', 'api.pushBadKeys'],
+  ['push keys in config.php do not belong together: run tools/push-keys.php again', 'api.pushBadKeys'],
+  ['push.subject in config.php must be mailto:<your address> or an https:// address', 'api.pushNoSubject'],
+  ['push.json is corrupt: delete it and switch push on again on each phone', 'api.pushCorrupt'],
+  ['endpoint must be the https address of a browser push service', 'api.pushEndpoint'],
+  ['keys must hold p256dh and auth of the browser subscription', 'api.pushEndpoint'],
+  ['this browser is not subscribed: switch push on again', 'api.pushGone'],
+  ['the push service did not answer', 'api.pushNoAnswer'],
 ]);
 
 const PATTERNS = [
@@ -77,6 +88,8 @@ const PATTERNS = [
   [/^(done|wait) must be an object$/, (m) => t('api.notifyObject', { name: alertName(m[1]) })],
   [/^(done|wait)\.sound must be a built-in tone \(/, (m) => t('api.notifySound', { name: alertName(m[1]) })],
   [/^(done|wait)\.anim must be one of: /, (m) => t('api.notifyAnim', { name: alertName(m[1]) })],
+  [/^prefs must hold true or false for: /, () => t('api.pushPrefs')],
+  [/^the push service answered HTTP (\d+)$/, (m) => t('api.pushHttp', { code: m[1] })],
   [/^file larger than (\d+) bytes$/, (m) => t('api.fileTooLarge', { n: m[1] })],
   [/^WAV must be PCM 16-bit mono 16000 Hz/, () => t('api.wavFormat')],
   [/^myinstants file is larger than (\d+) bytes$/, (m) => t('api.miTooLarge', { n: m[1] })],
@@ -204,6 +217,23 @@ export function createApi({
     /** Notification settings for the whole board: { mode, scope, done: { sound, anim }, wait: { ... } }. */
     async setNotify(settings) {
       return (await call('POST', 'notify', { json: notifyBody(settings) })).data;
+    },
+    /** Push on this server: {available: true, key} or {available: false, reason} with the reason as a sentence. */
+    async pushInfo() {
+      const { data } = await call('GET', 'push');
+      if (data?.available === true && typeof data.key === 'string') return { available: true, key: data.key };
+      return { available: false, reason: translateError(typeof data?.reason === 'string' ? data.reason : '', 200) };
+    },
+    /** Subscribes this browser or saves its choices; body from pushBody() in lib/push.js. */
+    async pushSave(body) {
+      return (await call('POST', 'push', { json: body })).data;
+    },
+    async pushDelete(endpoint) {
+      return (await call('POST', 'push_delete', { json: { endpoint } })).data;
+    },
+    /** Asks the server to send the current status to this browser now. */
+    async pushTest(endpoint) {
+      return (await call('POST', 'push_test', { json: { endpoint } })).data;
     },
     /** 15000 bytes, or null when the server has no wallpaper yet. */
     async getWallpaper() {

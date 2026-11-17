@@ -348,6 +348,28 @@
     <p class="hint" data-i18n="settings.langHint"></p>
     <p id="lang-error" class="error mark" role="alert"></p>
   </section>
+  <section class="settings" aria-labelledby="push-title">
+    <h3 id="push-title" data-i18n="push.title"></h3>
+    <p class="hint" data-i18n="push.intro"></p>
+    <p id="push-status" class="push-status" role="status"></p>
+    <button type="button" id="push-toggle" class="primary wide" hidden></button>
+    <div id="push-form" hidden>
+      <fieldset class="options" id="push-events">
+        <legend data-i18n="push.alertOn"></legend>
+        <label class="option"><input type="checkbox" name="push-event" value="done"><span><strong data-i18n="push.event.done"></strong></span></label>
+        <label class="option"><input type="checkbox" name="push-event" value="waiting"><span><strong data-i18n="push.event.waiting"></strong><span class="hint" data-i18n="push.event.waiting.hint"></span></span></label>
+        <label class="option"><input type="checkbox" name="push-event" value="working"><span><strong data-i18n="push.event.working"></strong></span></label>
+      </fieldset>
+      <p class="hint" data-i18n="push.quietHint"></p>
+      <fieldset class="options" id="push-sound-box">
+        <legend data-i18n="push.soundLegend"></legend>
+        <label class="option"><input type="checkbox" id="push-sound"><span><strong data-i18n="push.sound"></strong><span class="hint" data-i18n="push.sound.hint"></span></span></label>
+      </fieldset>
+      <p id="push-sound-system" class="hint"></p>
+      <button type="button" id="push-test" class="wide" data-i18n="push.test"></button>
+    </div>
+    <p id="push-error" class="error mark" role="alert"></p>
+  </section>
 </dialog>
 
 <dialog id="confirm" aria-labelledby="confirm-text">

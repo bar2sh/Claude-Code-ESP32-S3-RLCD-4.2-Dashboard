@@ -12,3 +12,4 @@ firmware/managed_components/
 __pycache__/
 # Session handoff notes stay local; the public repo describes the finished product.
 docs/PROGRESS.md
+server/config.php.bak-*

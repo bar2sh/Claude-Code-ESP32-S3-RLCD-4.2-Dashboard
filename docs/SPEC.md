@@ -46,6 +46,7 @@ Pliki leżą w katalogu `data_dir` z `config.php`, domyślnie `server/data/`.
 | `sounds/<id>.wav` | dźwięki z biblioteki |
 | `weather.json` | ostatni odczyt pogody z godziną pobrania |
 | `devices.json` | miejsca blokady urządzeń: skrót SHA-256 ciasteczka, imię i data zajęcia; tylko przy włączonej blokadzie (sekcja „Blokada urządzeń”) |
+| `push.json` | przeglądarki zapisane na powiadomienia push: adres w usłudze push, klucze przeglądarki, język, wybory urządzenia, imię i data; tylko gdy ktoś włączył push (sekcja „Powiadomienia push”) |
 | `.lock` | plik blokady, który ustawia zapisy w kolejce |
 
 ## Tryby pracy
@@ -221,6 +222,10 @@ Adres: `https://<host>/<katalog>/api.php?a=<akcja>`. Każde zapytanie niesie tok
 | `POST sound` | user | `name` w adresie, plik WAV w treści | wpis biblioteki z `"ok":true` |
 | `POST sound_delete` | user | JSON `{"id":"s1"}` | `{"ok":true}` |
 | `GET sound_source` | user | `url`, czyli link z myinstants.com | plik MP3, `audio/mpeg` |
+| `GET push` | user | — | `{"ok":true,"available":true,"key":"<klucz publiczny>"}` albo `{"ok":true,"available":false,"reason":"…"}` |
+| `POST push` | user | JSON `{"endpoint":"https://fcm.googleapis.com/…","keys":{"p256dh":"…","auth":"…"},"lang":"pl","prefs":{"working":false,"waiting":true,"done":true,"sound":true}}`; wszystkie pola wymagane | `{"ok":true,"prefs":{…}}` |
+| `POST push_delete` | user | JSON `{"endpoint":"…"}` | `{"ok":true}` |
+| `POST push_test` | user | JSON `{"endpoint":"…"}` | `{"ok":true}` po przyjęciu przez usługę push |
 
 ### Zasady wspólne
 
@@ -296,6 +301,7 @@ Adres: `https://<host>/<katalog>/api.php?a=<akcja>`. Każde zapytanie niesie tok
 | 409 | `sound library is full (50): delete a sound first` |
 | 413 | `body too large` (JSON ponad 4096 B); `file larger than 600000 bytes`; `sound is longer than 15 s` |
 | 500 | `config.php missing: copy config.example.php and fill it in`; `token 'device' missing or shorter than 24 chars` (tak samo dla `hook`); `config needs at least one entry in users`; `each user needs a name and a token of 24+ chars`; `app_lock must be ['devices' => N] with N a whole number (0 = off)`; `state.json is corrupt`; `devices.json is corrupt: fix it or delete it to free every place` (tylko dla przeglądarek); `cannot create data dir`; `cannot create sounds dir`; `cannot lock state`; `write failed` |
+| push | 400: `endpoint must be the https address of a browser push service`; `keys must hold p256dh and auth of the browser subscription`; `prefs must hold true or false for: working, waiting, done, sound`. 404: `this browser is not subscribed: switch push on again`. 500: `push.json is corrupt: delete it and switch push on again on each phone`. 502: `the push service did not answer`; `the push service answered HTTP N`. 503: powód wyłączonego push, ten sam co w `GET push` (sekcja „Powiadomienia push”) |
 | 501 | `cURL is not enabled on this hosting: download the sound and upload the file instead` |
 | 502 | `myinstants did not answer: …`; `myinstants answered HTTP N`; `myinstants refused the request (HTTP 403): download the sound and upload the file instead` (tak samo dla 429); `myinstants redirected to another site`; `too many redirects from myinstants`; `myinstants file is larger than N bytes`; `no sound found on that page`; `myinstants did not return an MP3 file` |
 
@@ -572,7 +578,7 @@ Pliki statyczne w `server/`, test `node server/tests/app_test.mjs`. Aplikacja ma
 
 - Statyczne pliki w `server/`, obok `api.php`, wgrywane przez FTP. Bez budowania, bez npm, bez zewnętrznych bibliotek, fontów i CDN. Czysty HTML, CSS i JavaScript (moduły ES).
 - Ten sam host co `api.php`, bo serwer nie wysyła nagłówków CORS. Aplikacja otwiera się pod `https://<host>/<katalog>/`.
-- Aplikacja używa API z sekcji „API serwera”. Jedyna akcja dodana dla niej to `POST notify` (sekcja „Powiadomienia o sesjach Claude”). Aplikacja nie odpowiada na pytania Claude: to robi Remote Control.
+- Aplikacja używa API z sekcji „API serwera”. Akcje dodane dla niej to `POST notify` (sekcja „Powiadomienia o sesjach Claude”) i akcje `push` (sekcja „Powiadomienia push”). Aplikacja nie odpowiada na pytania Claude: to robi Remote Control.
 - Podpis nadawcy daje serwer: pole `from` to imię przypisane do tokenu w `config.php`. Aplikacja nie wysyła imienia i nie da się go podrobić.
 - Użytkowników dodaje się w `config.php` przez FTP: imię i token. Aplikacja nie ma panelu administratora, bo API go nie ma.
 
@@ -590,11 +596,12 @@ Pliki statyczne w `server/`, test `node server/tests/app_test.mjs`. Aplikacja ma
 | `server/lib/anim.js` | klatki animacji powiadomień, reguła rogu listy sesji na płytce i reguła Clawda na Dashboardzie; źródło dla `tools/anim2c.mjs` |
 | `server/lib/dash.js` | dane Dashboardu: pasek limitu (fail-closed), czas, fakty i postęp zadań sesji |
 | `server/lib/i18n.js` | słownik napisów po angielsku i po polsku, język tego urządzenia |
-| `server/sw.js` | service worker: pamięć podręczna plików aplikacji |
+| `server/lib/push.js` | powiadomienia push tego urządzenia: wybory w `localStorage`, treść `POST push`, powód braku push |
+| `server/sw.js` | service worker: pamięć podręczna plików aplikacji i wyświetlanie powiadomień push |
 | `server/manifest.webmanifest` | nazwa, kolory, ikony; po angielsku, w języku domyślnym |
 | `server/manifest-pl.webmanifest` | ten sam manifest po polsku; różni się tylko nazwą, krótką nazwą, opisem i językiem |
 | `server/icons/` | `icon.svg`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` (180 px) |
-| `server/tests/app_test.mjs` | testy `wav.js`, `dither.js`, `text.js`, `api.js`, `anim.js`, `dash.js` i `i18n.js` w Node, bez sieci; do tego zgodność `index.html` i obu manifestów ze słownikiem |
+| `server/tests/app_test.mjs` | testy `wav.js`, `dither.js`, `text.js`, `api.js`, `anim.js`, `dash.js`, `push.js` i `i18n.js` oraz obsługi push w `sw.js` w Node, bez sieci; do tego zgodność `index.html` i obu manifestów ze słownikiem |
 
 `server/.htaccess` dostaje typ MIME dla `.webmanifest` (działa dla obu manifestów), nagłówek CSP i brak cache dla `sw.js`. CSP (Content Security Policy) to lista źródeł, z których strona może ładować kod: `default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`. Nagłówki są w `<IfModule mod_headers.c>`, więc hosting bez tego modułu dalej działa.
 
@@ -959,14 +966,65 @@ Blokada wpuszcza do aplikacji tylko kilka przeglądarek. Każda inna dostaje pod
 - błędny `app_lock` i błędny `config.php`;
 - zgodność `APPLOCK_FILES` z listą `FILES` w `sw.js`.
 
+## Powiadomienia push
+
+Telefon z zainstalowaną aplikacją pokazuje jedno powiadomienie systemowe ze stanem sesji Claude: które są w toku, które czekają i które są gotowe. Serwer przepisuje je przy każdej zmianie stanu sesji, także gdy aplikacja jest zamknięta. To osobna funkcja od powiadomień płytki (sekcja „Powiadomienia o sesjach Claude”) i ma własne ustawienia, osobne dla każdego urządzenia.
+
+### Jak to działa
+
+- Web Push to standard przeglądarek: przeglądarka dostaje od swojej usługi push (w Chrome na Androidzie to FCM Google'a) adres, pod który serwer wysyła zaszyfrowaną wiadomość, a usługa budzi telefon. `server/push.php` robi to bez bibliotek, funkcjami PHP `openssl`, `hash` i `curl`: podpis VAPID (RFC 8292, token JWT ES256) i szyfrowanie `aes128gcm` (RFC 8291).
+- Klucze VAPID, czyli para kluczy, którą serwer przedstawia się usłudze push, tworzy `php tools/push-keys.php`. Wynik trafia do bloku `push` w `config.php` razem z `subject`, adresem kontaktowym dla usługi push (`mailto:…` albo `https://…`). Bez kluczy, bez `subject`, z kluczami, które do siebie nie pasują, albo bez rozszerzeń PHP push jest wyłączony: `GET push` podaje powód, a reszta API działa jak dotąd. Nowe klucze kończą wszystkie zapisy i każdy telefon włącza push od nowa.
+- Zapis przeglądarki leży w `data/push.json`, nigdy w `state.json`, więc żadna odpowiedź API go nie zawiera. Jeden rekord na adres; ten sam adres ponownie aktualizuje rekord. Najwyżej 10 przeglądarek (`PUSH_MAX`), najstarsza ustępuje nowej.
+- Serwer wysyła zapytania pod adres podany przez przeglądarkę, więc przyjmuje tylko `https` w domenach usług push: `fcm.googleapis.com`, `push.services.mozilla.com`, `notify.windows.com` i `push.apple.com`, bez portu i bez danych logowania w adresie. Zmienna `RLCD_PUSH_ALLOW` dopuszcza jeszcze jeden początek adresu i służy tylko testom.
+- Usługa push, która odpowie 404 albo 410, nie zna już przeglądarki: serwer usuwa jej rekord.
+
+### Kiedy idzie push
+
+Przy `POST session`, które zmienia to, co pokazuje powiadomienie: stan sesji, jej nazwę, postęp zadań albo rodzaj oczekiwania. Zmiana stanu to zdarzenie z tabeli. Zmiana samej nazwy albo postępu w tym samym stanie to cichy `update`. Zgłoszenie, które nie zmienia tekstu (np. liczba subagentów), nie wysyła nic.
+
+| Zdarzenie | Kiedy | Powiadomienie |
+|---|---|---|
+| `working` | sesja zaczyna turę: nowa albo po `done` | „Pracuje: nazwa” |
+| `waiting` | sesja przechodzi w `waiting` | „Czeka na Ciebie: nazwa” |
+| `done` | sesja przechodzi z `working` albo `waiting` w `done` | „Gotowe: nazwa” |
+| `update` | każda inna zmiana: `waiting` → `working` po odpowiedzi, `end`, nowy wiersz od razu `done` | „Sesje Claude”, zawsze po cichu |
+
+- Treść to lista sesji według stanu, np. `W toku (1): Nowy wpis 2/5`, `Czeka (1): api (pytanie)`, `Gotowe (1): docs`. Nazwa to tytuł sesji albo alias, do 32 znaków. „2/5” to bieżący postęp listy zadań. Nazw kroków nie ma, bo hook ich nie wysyła.
+- Tekst układa serwer w języku zapisanym przy urządzeniu (`lang`), więc service worker tylko go wyświetla.
+- Zdarzenie, które urządzenie wybrało (`prefs.working`, `prefs.waiting`, `prefs.done`), ogłasza się od nowa (`renotify`). Pozostałe podmieniają tekst w miejscu, po cichu. `prefs.sound` równe `false` wycisza także ogłoszenia (`silent`).
+- **Dźwięk.** Przeglądarka nie pozwala aplikacji WWW podać własnego dźwięku powiadomienia ani odtworzyć go z service workera. Ton i wibracje wybiera system: w Androidzie Ustawienia → Aplikacje → Tablica → Powiadomienia. Aplikacja steruje tylko tym, czy powiadomienie ma dźwięk, i tym, o których zdarzeniach powiadamia.
+- Lista sesji bez wierszy (np. po `end` ostatniej sesji) nie wysyła push, bo każdy push musi skończyć się widocznym powiadomieniem. Ostatnie powiadomienie zostaje wtedy na ekranie do odrzucenia.
+- Push idzie po odpowiedzi dla hooka (`fastcgi_finish_request` albo `litespeed_finish_request`, gdy hosting je ma), równolegle do wszystkich przeglądarek, z limitem 2 s. Błąd wysyłki nie zmienia odpowiedzi `POST session`.
+- Nagłówki: `TTL: 3600`, `Topic: claude` (telefon, który był offline, dostaje tylko najnowszy stan), `Urgency: high` dla zdarzeń i `normal` dla `update`.
+- Wiadomość niesie `rev` stanu. Service worker nie zastępuje powiadomienia starszym, gdy dwie wiadomości się wyprzedzą. Dotknięcie powiadomienia otwiera aplikację.
+
+### Ustawienia w aplikacji
+
+Okno Osoby → Ustawienia → „Powiadomienia push”, osobno dla każdego urządzenia:
+
+- przycisk „Włącz na tym urządzeniu” (prośba o zgodę wymaga dotknięcia) i „Wyłącz na tym urządzeniu”;
+- „Powiadom mnie, gdy”: sesja jest gotowa (domyślnie tak), sesja czeka na mnie (tak), sesja zaczyna pracę (nie);
+- „Powiadomienia z dźwiękiem” (domyślnie tak) i wskazówka, gdzie Android wybiera ton;
+- „Wyślij powiadomienie testowe”: `POST push_test` wysyła bieżący stan do tej przeglądarki i zgłasza odpowiedź usługi push.
+
+Wybory leżą w `localStorage` pod `tablica.push` i na serwerze przy rekordzie przeglądarki; zmiana zapisuje się od razu. Stany bez przycisku mają własny tekst: zgoda zablokowana, przeglądarka bez push (iPhone wymaga aplikacji dodanej do ekranu początkowego), brak https, push wyłączony na serwerze z powodem. Przy każdym starcie aplikacja z włączonym push wysyła zapis ponownie, więc serwer nadąża za zmianą języka i adresem odnowionym przez przeglądarkę.
+
+### Testy push
+
+- `api_test.php`: szyfrowanie zgodne z przykładem z dodatku A RFC 8291, podpis VAPID, zdarzenia, tekst, wybory urządzenia, lista dozwolonych adresów, walidacja zapisu, wysyłka do lokalnej atrapy usługi push z odszyfrowaniem treści, usuwanie po 410, limit przeglądarek, uszkodzony `push.json`.
+- `app_test.mjs`: `lib/push.js`, zgodność zdarzeń, domyślnych wyborów i znacznika powiadomienia z `push.php`, tłumaczenia powodów.
+- Dostawy na prawdziwy telefon test nie sprawdza: wymaga wdrożenia na https i kluczy w `config.php`.
+
 ## Prywatność i bezpieczeństwo
+
+- Push: przez usługę push przeglądarki (np. FCM) przechodzą tytuły albo aliasy sesji, ich stany i postęp „zrobione z wszystkich”, zaszyfrowane kluczem przeglądarki, więc usługa ich nie czyta. Usługa widzi adres serwera, czas i rozmiar wiadomości. Klucz prywatny VAPID leży tylko w `config.php`, a `push.php` jest zablokowany w `.htaccess`.
 
 - Płytka sama nawiązuje każde połączenie: wychodzące HTTPS do serwera. Mac i płytka ze sobą nie rozmawiają. Nie ma lokalnego serwera, mDNS (rozgłaszania usług w sieci lokalnej) ani API w sieci domowej. USB służy tylko do wgrania programu.
 - Płytka, hook i każda osoba mają osobne tokeny. Tokeny leżą w trzech miejscach:
   - `config.php`, zablokowany w `.htaccess`;
   - `firmware/main/secrets.h`, wykluczony z repozytorium w `.gitignore`;
   - `~/.config/rlcd/`, z uprawnieniami 600.
-- `server/.htaccess` wyłącza listowanie katalogów i blokuje `config.php`, `config.example.php`, `sounds.php` i `applock.php`. Pozostałe zapytania poza `api.php` kieruje do `gate.php`, który wydaje tylko pliki aplikacji. `server/data/.htaccess` blokuje cały katalog danych.
+- `server/.htaccess` wyłącza listowanie katalogów i blokuje `config.php`, `config.example.php`, `sounds.php`, `applock.php` i `push.php`. Pozostałe zapytania poza `api.php` kieruje do `gate.php`, który wydaje tylko pliki aplikacji. `server/data/.htaccess` blokuje cały katalog danych.
 - Blokada urządzeń zapisuje w `devices.json` tylko skrót SHA-256 ciasteczka, imię i datę zajęcia miejsca. Ciasteczko ma flagę `HttpOnly`, więc skrypt strony go nie odczyta. Przy zajętych miejscach obca przeglądarka widzi pod adresem aplikacji tylko stronę 404 (sekcja „Blokada urządzeń”). Na hostingu bez obsługi `.htaccess` trzeba przenieść `data_dir` poza `public_html`.
 - Hook wysyła alias, początek identyfikatora sesji, tytuł sesji, stan oraz liczby i rodzaje: liczbę tur, liczbę pracujących subagentów, rodzaj oczekiwania (pytanie, plan, zgoda) i postęp listy zadań jako „zrobione z wszystkich”. Pasek stanu wysyła procenty limitów z czasami resetu, nazwę modelu i zapełnienie kontekstu w procentach. Nie wysyła ścieżki, poleceń, kodu, treści rozmowy ani nazw kroków zadań. Test hooka sprawdza, że żaden z tych tekstów nie trafia do `state.json`. Aliasy i tytuły sesji widać na płytce, w aplikacji i na serwerze, więc sesji z poufną nazwą, np. z nazwą klienta, warto nadać w aplikacji Claude neutralny tytuł.
 - Wiadomości, tapety i dźwięki zostają na własnym hostingu.

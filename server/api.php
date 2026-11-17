@@ -5,6 +5,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/sounds.php';
 require __DIR__ . '/applock.php';
+require __DIR__ . '/push.php';
 
 const WALLPAPER_BYTES = 15000; // 400x300, 1 bit per pixel
 const MESSAGE_MAX_CHARS = 280;
@@ -102,6 +103,21 @@ switch ("$method $action") {
     case 'POST sound_delete':
         auth('user');
         handleDeleteSound();
+        break;
+    case 'GET push':
+        auth('user');
+        handlePushInfo();
+        break;
+    case 'POST push':
+        handlePushSave(auth('user'));
+        break;
+    case 'POST push_delete':
+        auth('user');
+        handlePushDelete();
+        break;
+    case 'POST push_test':
+        auth('user');
+        handlePushTest();
         break;
     case 'GET sound_source':
         auth('user');
@@ -273,8 +289,11 @@ function handleSession(): void
     // One row per Claude Code session (sid); a hook without sid keeps one row per project (alias).
     // ":" never occurs in an alias, so the two kinds of keys cannot collide.
     $key = $sid !== null ? "s:$sid" : $alias;
-    [$s] = withState(function (array $s) use ($key, $sid, $alias, $title, $st, $extra) {
-        $before = json_encode(sessionList($s, false));
+    $was = null;
+    $shown = []; // the list before this report, to tell whether the phone's status would read differently
+    [$s] = withState(function (array $s) use ($key, $sid, $alias, $title, $st, $extra, &$was, &$shown) {
+        $shown = sessionList($s, false);
+        $before = json_encode($shown);
         $evBefore = $s['ev'];
         $live = pruneSessions($s['sessions']); // a row past its 12 h counts as gone, so its next report starts fresh
         $was = $live[$key]['state'] ?? ($sid !== null ? ($live[$alias]['state'] ?? null) : null);
@@ -301,6 +320,13 @@ function handleSession(): void
         $after = json_encode(sessionList($s, false));
         return [$after !== $before || $s['ev'] !== $evBefore ? bump($s) : $s, true];
     });
+    $event = pushEvent($was, $st);
+    if ($event === null && pushText('en', 'update', null, $shown)[1] !== pushText('en', 'update', null, sessionList($s, false))[1]) {
+        $event = 'update'; // the same state, but a new title or task progress: the status follows, quietly
+    }
+    if ($event !== null) {
+        pushSessionsLater($event, (string)$key, sessionList($s), $s['rev']);
+    }
     respond(['ok' => true, 'rev' => $s['rev']]);
 }
 
@@ -530,6 +556,182 @@ function sessionTitle(mixed $title): string
     }
     $title = (string)preg_replace('/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\s]+/u', ' ', $title);
     return trim(mb_substr(trim($title), 0, SESSION_TITLE_MAX, 'UTF-8'));
+}
+
+// ---------- push notifications of the app (push.php; subscriptions in data/push.json) ----------
+
+/** Runs $fn(subscriptions) under the state lock; $fn returns the new list to save, or null to leave the file. */
+function withPush(callable $fn): void
+{
+    global $dataDir;
+    if (!is_dir($dataDir) && !mkdir($dataDir, 0750, true) && !is_dir($dataDir)) {
+        fail(500, 'cannot create data dir');
+    }
+    $lock = fopen("$dataDir/.lock", 'c');
+    if ($lock === false || !flock($lock, LOCK_EX)) {
+        fail(500, 'cannot lock state');
+    }
+    try {
+        $subs = pushRead($dataDir);
+        if ($subs === null) {
+            fail(500, 'push.json is corrupt: delete it and switch push on again on each phone');
+        }
+        $new = $fn($subs);
+        if ($new !== null) {
+            atomicWrite("$dataDir/" . PUSH_FILE, json_encode(['subs' => array_values($new)], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) . "\n");
+        }
+    } finally {
+        flock($lock, LOCK_UN);
+        fclose($lock);
+    }
+}
+
+/** The push setup or a 503 that names what is missing in config.php. */
+function pushReady(): array
+{
+    global $config;
+    $cfg = pushConfig($config);
+    if (!$cfg['ok']) {
+        fail(503, $cfg['reason']);
+    }
+    return $cfg;
+}
+
+/** Whether push can be switched on and the key the browser subscribes with. */
+function handlePushInfo(): void
+{
+    global $config;
+    $cfg = pushConfig($config);
+    respond($cfg['ok'] ? ['ok' => true, 'available' => true, 'key' => $cfg['public']]
+        : ['ok' => true, 'available' => false, 'reason' => $cfg['reason']]);
+}
+
+function pushEndpointOf(array $body): string
+{
+    $endpoint = $body['endpoint'] ?? null;
+    if (!pushEndpointOk($endpoint)) {
+        fail(400, 'endpoint must be the https address of a browser push service');
+    }
+    return $endpoint;
+}
+
+/** Subscribes this browser or saves its new choices: one record per endpoint. */
+function handlePushSave(string $by): void
+{
+    pushReady();
+    $body = jsonBody();
+    $endpoint = pushEndpointOf($body);
+    $point = pushUnB64($body['keys']['p256dh'] ?? null);
+    $auth = pushUnB64($body['keys']['auth'] ?? null);
+    if ($point === null || strlen($point) !== 65 || $point[0] !== "\x04" || $auth === null || strlen($auth) !== 16) {
+        fail(400, 'keys must hold p256dh and auth of the browser subscription');
+    }
+    if (!in_array($body['lang'] ?? null, LANGS, true)) {
+        fail(400, 'lang must be one of: ' . implode(', ', LANGS));
+    }
+    $prefs = pushPrefs($body['prefs'] ?? null);
+    if ($prefs === null) {
+        fail(400, 'prefs must hold true or false for: ' . implode(', ', array_keys(PUSH_PREFS)));
+    }
+    $sub = ['endpoint' => $endpoint, 'p256dh' => pushB64($point), 'auth' => pushB64($auth),
+        'lang' => $body['lang'], 'prefs' => $prefs, 'name' => $by, 'added' => date('c')];
+    withPush(function (array $subs) use ($sub) {
+        foreach ($subs as $i => $x) {
+            if ($x['endpoint'] === $sub['endpoint']) {
+                $subs[$i] = ['added' => $x['added'] ?? $sub['added']] + $sub;
+                return $subs;
+            }
+        }
+        $subs[] = $sub;
+        return array_slice($subs, -PUSH_MAX); // the oldest browser gives way
+    });
+    respond(['ok' => true, 'prefs' => $prefs]);
+}
+
+function handlePushDelete(): void
+{
+    $endpoint = pushEndpointOf(jsonBody());
+    withPush(function (array $subs) use ($endpoint) {
+        $left = array_filter($subs, fn(array $x) => $x['endpoint'] !== $endpoint);
+        return count($left) === count($subs) ? null : $left;
+    });
+    respond(['ok' => true]);
+}
+
+/** Sends the current status to one subscribed browser, as an alert, and reports what its push service said. */
+function handlePushTest(): void
+{
+    global $dataDir;
+    $cfg = pushReady();
+    $endpoint = pushEndpointOf(jsonBody());
+    $subs = pushRead($dataDir);
+    if ($subs === null) {
+        fail(500, 'push.json is corrupt: delete it and switch push on again on each phone');
+    }
+    $sub = current(array_filter($subs, fn(array $x) => $x['endpoint'] === $endpoint));
+    if ($sub === false) {
+        fail(404, 'this browser is not subscribed: switch push on again');
+    }
+    [$s] = withState(fn(array $s) => [$s, false]);
+    $status = pushSend($cfg, [['sub' => $sub, 'payload' => pushPayload($sub, 'test', null, sessionList($s), $s['rev']), 'urgent' => true]], 8)[0];
+    if ($status === 404 || $status === 410) {
+        pushForget([$endpoint]);
+        fail(404, 'this browser is not subscribed: switch push on again');
+    }
+    if ($status < 200 || $status >= 300) {
+        fail(502, $status === 0 ? 'the push service did not answer' : "the push service answered HTTP $status");
+    }
+    respond(['ok' => true]);
+}
+
+/** Drops subscriptions their push service no longer knows. */
+function pushForget(array $endpoints): void
+{
+    withPush(function (array $subs) use ($endpoints) {
+        $left = array_filter($subs, fn(array $x) => !in_array($x['endpoint'], $endpoints, true));
+        return count($left) === count($subs) ? null : $left;
+    });
+}
+
+/**
+ * After a session changed state: the new status goes to every subscribed browser once the hook has its answer,
+ * so a slow push service never holds the hook up. Any trouble here stays silent; the session report is saved.
+ */
+function pushSessionsLater(string $event, string $id, array $rows, int $rev): void
+{
+    global $config, $dataDir;
+    if ($rows === [] || !is_file("$dataDir/" . PUSH_FILE)) {
+        return; // a push must show something, and an empty list has nothing to show
+    }
+    register_shutdown_function(function () use ($event, $id, $rows, $rev, $config, $dataDir) {
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        } elseif (function_exists('litespeed_finish_request')) {
+            litespeed_finish_request();
+        }
+        ignore_user_abort(true);
+        ob_start(fn() => ''); // the answer is out; nothing from here may follow it
+        try {
+            $cfg = pushConfig($config);
+            $subs = pushRead($dataDir);
+            if (!$cfg['ok'] || !$subs) {
+                return;
+            }
+            $jobs = array_map(fn(array $sub) => ['sub' => $sub, 'payload' => pushPayload($sub, $event, $id, $rows, $rev),
+                'urgent' => $event !== 'update'], $subs);
+            $gone = [];
+            foreach (pushSend($cfg, $jobs) as $k => $status) {
+                if ($status === 404 || $status === 410) {
+                    $gone[] = $subs[$k]['endpoint'];
+                }
+            }
+            if ($gone !== []) {
+                pushForget($gone);
+            }
+        } catch (Throwable $e) {
+            error_log('rlcd push: ' . $e->getMessage());
+        }
+    });
 }
 
 // ---------- sound library (data/sounds/<id>.wav, list in state.json) ----------

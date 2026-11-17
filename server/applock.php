@@ -27,6 +27,7 @@ const APPLOCK_FILES = [
     'lib/anim.js' => APPLOCK_JS,
     'lib/dash.js' => APPLOCK_JS,
     'lib/i18n.js' => APPLOCK_JS,
+    'lib/push.js' => APPLOCK_JS,
     'manifest.webmanifest' => 'application/manifest+json',
     'manifest-pl.webmanifest' => 'application/manifest+json',
     'icons/icon.svg' => 'image/svg+xml',

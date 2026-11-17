@@ -1207,6 +1207,15 @@ dialog p {
   border-top: 1px solid var(--line);
 }
 
+/* Push notifications of this device, the second block of the app settings (docs/SPEC.md, "Powiadomienia push"). */
+.push-status {
+  margin: 12px 0;
+}
+
+#push-form > * {
+  margin-top: 12px;
+}
+
 /* The same reason as .pnote: the muted hint would drop below 4.5:1 over the scrim. */
 dialog .hint {
   color: var(--ink);

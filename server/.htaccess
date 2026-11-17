@@ -1,5 +1,5 @@
 Options -Indexes
-<FilesMatch "^(config\.php|config\.example\.php|sounds\.php|applock\.php)$">
+<FilesMatch "^(config\.php|config\.example\.php|sounds\.php|applock\.php|push\.php)$">
     Require all denied
 </FilesMatch>
 
